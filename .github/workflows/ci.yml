@@ -29,7 +29,9 @@ jobs:
       - name: Shell syntax
         run: |
           for f in install.sh test/*.sh scripts/*.sh plugins/*/skills/*/scripts/*.sh; do
-            [ -f "$f" ] && sh -n "$f"
+            [ -f "$f" ] || continue
+            # check with the interpreter the shebang names (bash scripts use arrays)
+            if head -n 1 "$f" | grep -q bash; then bash -n "$f"; else sh -n "$f"; fi
           done
       - name: CLI smoke
         run: |
