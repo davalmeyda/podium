@@ -58,6 +58,10 @@ Ask the user, in one round, with sensible defaults pre-selected:
    `memory`, `usage`, `upgrade`. Recommend turning `codegraph` off if the
    `codegraph` CLI is missing and the user does not want to install it, and
    `memory` off if they have no memory MCP server.
+   Then ask separately whether the agent may **develop in git worktrees**
+   (`worktrees`, opt-in, default off): when on, the principal can move a large or
+   structural change to a git worktree beside the repo and merge it back into the
+   main checkout itself (`podium worktree`). Answer with `"worktrees": true|false`.
 3. **Memory server URL** (only if `memory` is on), e.g. a Graphiti MCP endpoint.
 4. **Roster preset**: `opencode-multi` (a Claude principal plus OpenCode
    executors such as MiniMax and GPT; recommend it when those providers are
@@ -78,6 +82,7 @@ Write the answers to a temporary JSON file, for example:
   "modules": ["rules", "executors", "codegraph", "memory", "usage", "upgrade"],
   "memory": {"url": "https://memory.example.com/mcp"},
   "roster_preset": "opencode-multi",
+  "worktrees": false,
   "adopt": false
 }
 ```

@@ -50,7 +50,8 @@ def _make_env(tmp):
 
 def _write_runtime(cfg_dir, state_dir, ui="en", gate=True, roots=None,
                    manifests=None, ignored=None, nudge_every=4,
-                   home=None, claude_dir=None, opencode_data_dir=None):
+                   home=None, claude_dir=None, opencode_data_dir=None,
+                   worktrees=False):
     os.makedirs(cfg_dir, exist_ok=True)
     payload = {
         "schema": 1,
@@ -67,6 +68,7 @@ def _write_runtime(cfg_dir, state_dir, ui="en", gate=True, roots=None,
             "roots": roots or [],
             "manifests": manifests or [],
             "ignored": ignored or [],
+            "worktrees": worktrees,
         },
     }
     with open(os.path.join(cfg_dir, "runtime.json"), "w", encoding="utf-8") as f:
@@ -833,6 +835,195 @@ class ConfiguredRootsAndFallbackTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 msg = json.loads(out)["hookSpecificOutput"]["additionalContext"]
                 self.assertIn("CodeGraph index available", msg)
+
+
+def _make_worktree(parent, name="wt1", gitdir="/x/repo/.git/worktrees/t1",
+                   manifest="package.json"):
+    """Create a fake worktree directory: a project manifest plus a `.git` file
+    whose content is a `gitdir:` pointer containing `/worktrees/`."""
+    p = Path(parent) / name
+    p.mkdir(parents=True, exist_ok=True)
+    (p / manifest).write_text('{"name": "x"}')
+    (p / ".git").write_text(f"gitdir: {gitdir}\n")
+    return str(p)
+
+
+class WorktreeGateTests(unittest.TestCase):
+    """Gate behaviour when `codegraph.worktrees` is enabled in runtime.json.
+
+    Worktrees must NEVER ask the user: the gate blocks the tool with the
+    `deny_worktree` template until `codegraph init` has produced the index."""
+
+    def test_worktree_is_denied_with_worktree_text(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            worktree = _make_worktree(tmp / "home", "wt1")
+            _write_runtime(str(cfg_dir), state_dir, worktrees=True)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("codegraph init", reason)
+            self.assertIn(worktree, reason)
+            # The normal ask text must NOT appear: we never want a worktree to
+            # be offered to the user as a question.
+            self.assertNotIn("Index now", reason)
+            self.assertNotIn("Do not index", reason)
+            self.assertNotIn("AskUserQuestion", reason)
+
+    def test_worktree_with_worktrees_false_uses_normal_ask(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            worktree = _make_worktree(tmp / "home", "wt1")
+            _write_runtime(str(cfg_dir), state_dir, worktrees=False)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+            # Normal ask text is present; worktree text is not.
+            self.assertIn("AskUserQuestion", reason)
+            self.assertIn("Index now", reason)
+            self.assertIn("Do not index", reason)
+            self.assertNotIn("git worktree", reason)
+
+    def test_worktree_with_worktrees_key_absent_uses_normal_ask(self):
+        """Older runtime.json files have no `worktrees` key; behaviour must
+        match today exactly (worktree treated as a regular project)."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            worktree = _make_worktree(tmp / "home", "wt1")
+            # Write runtime.json directly WITHOUT the worktrees entry.
+            os.makedirs(cfg_dir, exist_ok=True)
+            payload = {
+                "schema": 1, "ui": "en",
+                "paths": {
+                    "home": str(Path(cfg_dir).parent / "home"),
+                    "claude_dir": str(Path(cfg_dir).parent / "home" / ".claude"),
+                    "opencode_data_dir": str(Path(cfg_dir).parent / "xdg-data" / "opencode"),
+                    "state_dir": state_dir,
+                },
+                "codegraph": {
+                    "gate": True, "nudge_every": 4,
+                    "roots": [], "manifests": [], "ignored": [],
+                },
+            }
+            with open(os.path.join(cfg_dir, "runtime.json"), "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            env = _make_env(tmp)
+            payload_in = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload_in)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("AskUserQuestion", reason)
+            self.assertIn("Index now", reason)
+            self.assertNotIn("git worktree", reason)
+
+    def test_worktree_with_index_present_is_allowed(self):
+        """Once `.codegraph/` exists at the worktree, the index branch in
+        `gate()` short-circuits BEFORE the worktree check: the read is allowed
+        and the hook emits no output."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            worktree = _make_worktree(tmp / "home", "wt1")
+            (Path(worktree) / ".codegraph").mkdir()
+            _write_runtime(str(cfg_dir), state_dir, worktrees=True)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            self.assertEqual(out.strip(), "")
+
+    def test_normal_repo_with_worktrees_enabled_uses_normal_ask(self):
+        """A regular project (no `.git` file pointing to a worktree) must NOT
+        be misclassified as a worktree just because the module is enabled."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            project = _make_project(tmp / "home", "app")
+            _write_runtime(str(cfg_dir), state_dir, worktrees=True)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(project, "foo.txt")},
+                "cwd": project,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("AskUserQuestion", reason)
+            self.assertIn("Index now", reason)
+            self.assertNotIn("git worktree", reason)
+
+    def test_worktree_es_locale_renders_spanish_text(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            worktree = _make_worktree(tmp / "home", "wt1")
+            _write_runtime(str(cfg_dir), state_dir, ui="es", worktrees=True)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("worktree de git", reason)
+            self.assertIn("codegraph init", reason)
+            self.assertIn(worktree, reason)
+            self.assertNotIn("git worktree", reason)
+            self.assertNotIn("AskUserQuestion", reason)
 
 
 if __name__ == "__main__":

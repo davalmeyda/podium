@@ -15,12 +15,17 @@ fragments = [
   { id = "context-diet", module = "rules" },
   { id = "phases", module = "rules" },
   { id = "contract-parallelism", module = "rules" },
+  { id = "contract-isolation", module = "rules", requires = "no-worktrees" },
+  { id = "contract-isolation-worktrees", module = "worktrees" },
+  { id = "contract-invariants", module = "rules" },
+  { id = "worktrees", module = "worktrees" },
   { id = "cheap-subagents", module = "rules" },
   { id = "review", module = "rules" },
   { id = "second-opinion", module = "rules" },
   { id = "project-rules", module = "rules" },
   { id = "memory", module = "memory" },
   { id = "codegraph", module = "codegraph" },
+  { id = "worktrees-codegraph", module = "codegraph", requires = "worktrees" },
 ]
 
 [[target]]

@@ -84,7 +84,8 @@ def _check_module_deps(modules: Mapping[str, Any]) -> None:
     ``rules`` and ``executors`` need ``claude`` and ``opencode`` CLI >= 2.0.0;
     ``codegraph`` needs the ``codegraph`` CLI; ``memory`` needs a configured
     URL that answers anything within 5s; ``usage`` needs the python ``sqlite3``
-    module (always present on the stdlib).
+    module (always present on the stdlib); ``worktrees`` needs ``git`` on PATH
+    so the principal can drive ``podium worktree`` from a checkout.
     """
     modules = modules or {}
 
@@ -143,6 +144,14 @@ def _check_module_deps(modules: Mapping[str, Any]) -> None:
             _record(_Severity.OK, "usage", "sqlite3 importable")
         except Exception as exc:  # pragma: no cover - stdlib always loads
             _record(_Severity.FAIL, "usage", str(exc))
+
+    if modules.get("worktrees"):
+        # `podium worktree` shells out to `git` for the worktree lifecycle;
+        # without it the module is enabled but every command will fail.
+        if shutil.which("git") is None:
+            _record(_Severity.FAIL, "git cli", "worktrees module needs git")
+        else:
+            _record(_Severity.OK, "git cli", shutil.which("git"))
 
 
 def _major_version_from_path(path: str, name: str) -> int | None:

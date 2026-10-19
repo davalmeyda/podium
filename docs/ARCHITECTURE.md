@@ -101,6 +101,10 @@ codegraph = true
 memory = true
 usage = true
 upgrade = true
+worktrees = false        # opt-in; every other module defaults to true
+
+[worktrees]              # only read when the worktrees module is on
+link = ["node_modules"]  # folders symlinked from the main checkout into each worktree
 
 [principal]
 always_background = true          # launch every agent in background (keeps the main thread free)
@@ -180,8 +184,10 @@ fragments = [ { id = "habits", module = "rules" }, ... ]
 ```
 `source` (optional) is the fragment directory relative to `podium_home`
 (default `rules`). Fragments of a disabled module are skipped. A fragment may also carry
-`requires = "opencode-executors"`: it is rendered only when some roster row launches through
-OpenCode (`launch.kind = "opencode"`), so a Claude-only roster never receives OpenCode instructions.
+`requires = "<predicate>"`: `opencode-executors` renders it only when some roster row launches through
+OpenCode (`launch.kind = "opencode"`), so a Claude-only roster never receives OpenCode instructions;
+`worktrees` / `no-worktrees` render it only when the `worktrees` module is on / off (used to swap the
+last-resort isolation text for the worktree procedure).
 Fragments are joined with exactly one blank line between them.
 
 ### 5.3 Overlays `config_dir/overlays/<target-id>/`
@@ -313,12 +319,14 @@ docs and rules use the namespaced name.
    ```json
    {"schema": 1, "ui": "en",
     "paths": {"home": "/abs", "claude_dir": "/abs", "opencode_data_dir": "/abs", "state_dir": "/abs"},
-    "codegraph": {"gate": true, "nudge_every": 4, "roots": [], "manifests": [], "ignored": []},
+    "codegraph": {"gate": true, "nudge_every": 4, "roots": [], "manifests": [], "ignored": [], "worktrees": false},
     "memory": {"mcp_server": "graphiti-memory", "min_edits": 8, "min_executor_runs": 2, "cooldown_seconds": 2700},
     "executors": {"launcher_regex": "opencode run "},
     "usage": {"model_order": ["opus","sonnet","haiku","gpt","minimax"]}}
    ```
    `manifests`/`ignored` are the *extra* entries; built-in lists live in the hook.
+   `codegraph.worktrees` mirrors the `worktrees` module: the gate then never asks about a git
+   worktree (`.git` is a file pointing into `.../worktrees/`) and denies work there until it is indexed.
 3. Load `locales/<ui>.json` from its own plugin directory (fallback `en`).
 4. Fail open (exit 0, no stdout) on any error, but append one line
    `<iso-time> <hook> <error>` to `state_dir/hooks.log`; `doctor` reports it.
@@ -349,6 +357,7 @@ podium migrate   [--dry-run]
 podium doctor
 podium uninstall [--dry-run]
 podium update    [--dry-run]
+podium worktree  create|integrate|clean <repo> <task> [files...]
 ```
 
 `install` = validate config → render all targets → write runtime.json →
@@ -358,7 +367,15 @@ apply plan (§7) → `claude plugin marketplace add <podium_home>` +
 `update` = move the checkout to `PODIUM_REF` (default: the highest
 `vX.Y.Z` tag on origin, else `main`) with fetch + detached checkout, exactly
 like `install.sh`, then run the new checkout's `podium install`.
-All commands are idempotent; `--dry-run` writes nothing. Exit codes: 0 ok,
+`worktree` runs `scripts/worktree.sh` (bash + git) with `PODIUM_STATE_DIR` and
+`PODIUM_WORKTREE_LINKS` (from `[worktrees] link`): `create` makes `../<repo>-wt/<task>` on
+branch `wt/<task>` from `git stash create` (or `HEAD`), copies the listed untracked files and
+symlinks the link folders; `integrate` three-way merges every changed, new or deleted file onto
+the main checkout's working tree (exit 2 on conflicts, markers `<<<<<<< main` / `>>>>>>> worktree`,
+`<file>.worktree` for files created on both sides); `clean` removes the worktree, branch, stored
+base, empty sibling folder and the CodeGraph decision. It never commits and never touches the main
+checkout's branch or index.
+All commands except `worktree` are idempotent; `--dry-run` writes nothing. Exit codes: 0 ok,
 1 user/config error, 2 conflict (foreign or modified file), 3 environment error.
 
 ## 12. Installation flows

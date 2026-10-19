@@ -74,6 +74,7 @@ Look at the generated files under that directory, then delete it.
 | `memory` | Plugin `podium-memory`: the `project-memory` skill plus a stop hook that nudges agents to log milestones in a shared [Graphiti](https://github.com/getzep/graphiti) work log. |
 | `usage` | Plugin `podium-usage`: tokens consumed by the session, its subagents and the OpenCode runs it launched. |
 | `upgrade` | Plugin `podium-upgrade`: the `agents-upgrade` skill researches current models and updates your roster in `podium.toml`, then re-runs `podium install`. |
+| `worktrees` | **Opt-in** (off unless you enable it). Rules that let the principal move a large or structural change to a git worktree beside the repo and merge it back itself with `podium worktree create / integrate / clean`: no commits, the main checkout's branch and index untouched, dependency folders symlinked instead of copied, nothing left behind after `clean`. |
 
 Every module is optional. Two roster presets ship with podium:
 `opencode-multi` (Claude principal + OpenCode executors across providers) and

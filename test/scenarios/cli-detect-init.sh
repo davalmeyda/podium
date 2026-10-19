@@ -280,9 +280,9 @@ HOME="$WIZ_HOME" \
 WIZ_BIN="$WIZ_HOME/.local/bin/podium"
 check "wizard HOME has podium linked" "test -x $WIZ_BIN"
 mkdir -p "$WIZ_HOME/.config/podium"
-# Eight Enters (one per prompt); input goes via stdin to the pty child.
+# Nine Enters (one per prompt); input goes via stdin to the pty child.
 # The env must be set on `script` itself (the piped printf does not get it).
-printf '\n\n\n\n\n\n\n\n' | \
+printf '\n\n\n\n\n\n\n\n\n' | \
   HOME="$WIZ_HOME" \
   PATH="$WIZ_HOME/.local/bin:$WIZ_HOME/.opencode/bin:$PATH" \
   script -qfec "$WIZ_BIN init" /dev/null > /tmp/wizard-defaults.log 2>&1
@@ -298,6 +298,8 @@ check "wizard default language.domain = en"  "grep -q 'domain = \"en\"' $WIZ_TOM
 check "wizard default language.ui = en"      "grep -q 'ui = \"en\"' $WIZ_TOML"
 check "wizard default memory module is on" "grep -q '^memory = true' $WIZ_TOML"
 check "wizard default upgrade module is on" "grep -q '^upgrade = true' $WIZ_TOML"
+check "wizard default worktrees module is off (opt-in)" "grep -q '^worktrees = false' $WIZ_TOML"
+check "wizard default wrote no [worktrees] table" "! grep -q '^\\[worktrees\\]' $WIZ_TOML"
 check "wizard default preset body contains the minimax-fast entry" \
   "grep -q '\"minimax-fast\"' $WIZ_TOML"
 check "wizard default wrote no [memory] URL block" \
@@ -313,9 +315,9 @@ HOME="$WIZ2_HOME" \
 WIZ2_BIN="$WIZ2_HOME/.local/bin/podium"
 check "wizard2 HOME has podium linked" "test -x $WIZ2_BIN"
 mkdir -p "$WIZ2_HOME/.config/podium"
-# Eight explicit answers: language es/es/es, modules rules+executors only,
-# memory URL https://example.test, preset claude-only, adopt=n, overwrite=n.
-printf 'es\nes\nes\nrules,executors\nhttps://example.test\nclaude-only\nn\nn\n' | \
+# Nine explicit answers: language es/es/es, modules rules+executors only,
+# memory URL https://example.test, preset claude-only, worktrees=y, adopt=n, overwrite=n.
+printf 'es\nes\nes\nrules,executors\nhttps://example.test\nclaude-only\ny\nn\nn\n' | \
   HOME="$WIZ2_HOME" \
   PATH="$WIZ2_HOME/.local/bin:$WIZ2_HOME/.opencode/bin:$PATH" \
   script -qfec "$WIZ2_BIN init" /dev/null > /tmp/wizard-explicit.log 2>&1
@@ -330,6 +332,9 @@ check "explicit wizard language.ui = es"      "grep -q 'ui = \"es\"' $WIZ2_TOML"
 check "explicit wizard rules = true" "grep -q '^rules = true' $WIZ2_TOML"
 check "explicit wizard executors = true" "grep -q '^executors = true' $WIZ2_TOML"
 check "explicit wizard turned off codegraph" "grep -q '^codegraph = false' $WIZ2_TOML"
+check "explicit wizard asked about worktrees" "grep -q 'develop in git worktrees' /tmp/wizard-explicit.log"
+check "explicit wizard enabled worktrees" "grep -q '^worktrees = true' $WIZ2_TOML"
+check "explicit wizard wrote the [worktrees] link" "grep -q 'link = \\[\"node_modules\"\\]' $WIZ2_TOML"
 check "explicit wizard wrote the memory URL" \
   "grep -q 'url = \"https://example.test\"' $WIZ2_TOML"
 check "explicit wizard wrote the claude-only preset body" \

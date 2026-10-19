@@ -386,7 +386,8 @@ class InstallTest(coretest.CoreCase):
             "opencode_data_dir": str(self.home / ".local" / "share" / "opencode"),
             "state_dir": str(self.state_dir)})
         self.assertEqual(runtime["codegraph"], {"gate": True, "nudge_every": 4, "roots": ["/srv"],
-                                                "manifests": ["m.toml"], "ignored": ["vendor"]})
+                                                "manifests": ["m.toml"], "ignored": ["vendor"],
+                                                "worktrees": False})
         self.assertEqual(runtime["memory"], {"mcp_server": "graphiti-memory", "min_edits": 8,
                                              "min_executor_runs": 2, "cooldown_seconds": 2700})
         self.assertEqual(runtime["executors"], {"launcher_regex": "opencode run "})

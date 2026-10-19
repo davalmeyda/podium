@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
+from podium import config as config_mod
 from podium import render as render_mod
 from podium import state
 from podium.paths import Paths
@@ -29,7 +30,7 @@ PLUGIN_BY_MODULE = (
     ("usage", "podium-usage"),
     ("upgrade", "podium-upgrade"),
 )
-ALL_MODULES = ("rules", "executors", "codegraph", "memory", "usage", "upgrade")
+ALL_MODULES = config_mod.MODULES
 EXEC_TIMEOUT = 180
 MEMORY_SKILLS_PLUGIN = "podium-memory"
 
@@ -765,6 +766,7 @@ def runtime_document(paths: Paths, config: Mapping[str, Any]) -> Dict[str, Any]:
             "roots": list(cg["roots"]),
             "manifests": list(cg["extra_manifests"]),
             "ignored": list(cg["extra_ignored"]),
+            "worktrees": bool(config["modules"].get("worktrees", False)),
         },
         "memory": {
             "mcp_server": mem["mcp_server"],

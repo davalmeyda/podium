@@ -165,5 +165,73 @@ class RenderTest(unittest.TestCase):
         self.assertIn("español — ¿qué?", self.render())
 
 
+class WorktreesRenderTest(unittest.TestCase):
+    """The ``worktrees`` opt-in toggles rule fragments in ``claude-md``.
+
+    The shipped ``rules/`` directory is the real source of truth for the
+    worktrees rules, so these tests point ``podium_home`` at the repo root
+    rather than at the fixture home used by the rest of the suite.
+    """
+
+    REPO = Path(__file__).resolve().parents[1]
+
+    def setUp(self) -> None:
+        self.config_dir = Path(tempfile.mkdtemp(prefix="podium-wt-render-"))
+        self.addCleanup(shutil.rmtree, str(self.config_dir), True)
+        # Roster stub so `generated.*` won't blow up if a fragment looks it up.
+        patcher = mock.patch.dict(sys.modules, {"podium.roster": coretest.fake_roster()})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def cfg(self, *, worktrees: bool, codegraph: bool = True) -> dict:
+        base = {
+            "language": {"response": "en", "domain": "en", "ui": "en"},
+            "modules": {
+                "rules": True, "executors": True, "codegraph": codegraph,
+                "memory": False, "usage": True, "upgrade": True,
+                "worktrees": worktrees,
+            },
+            "roster_notes": {"cascade": [], "excluded": []},
+        }
+        return config.from_dict(base, {})
+
+    def render(self, cfg_obj) -> str:
+        return render.render_target("claude-md", cfg_obj, self.REPO, self.config_dir)
+
+    def test_worktrees_off_keeps_exception_block(self) -> None:
+        text = self.render(self.cfg(worktrees=False))
+        self.assertIn("Exception / last resort", text)
+        self.assertNotIn("### Worktrees", text)
+        self.assertNotIn("podium worktree", text)
+        self.assertNotIn("Worktrees and CodeGraph", text)
+
+    def test_worktrees_on_emits_worktrees_blocks_and_drops_exception(self) -> None:
+        text = self.render(self.cfg(worktrees=True))
+        self.assertIn("### Worktrees", text)
+        self.assertIn("podium worktree create", text)
+        self.assertIn("that side moves to a **worktree**", text)
+        self.assertNotIn("Exception / last resort", text)
+
+    def test_worktrees_on_and_codegraph_off_omits_codeg_gate_fragment(self) -> None:
+        text = self.render(self.cfg(worktrees=True, codegraph=False))
+        # Without codegraph on, the gated `worktrees-codegraph` fragment is
+        # skipped, so the joined "Worktrees and CodeGraph" sentence is gone.
+        self.assertNotIn("Worktrees and CodeGraph", text)
+        # The opt-in worktrees block itself still renders.
+        self.assertIn("### Worktrees", text)
+
+    def test_worktrees_on_and_codegraph_on_emits_codeg_gate_fragment(self) -> None:
+        text = self.render(self.cfg(worktrees=True, codegraph=True))
+        self.assertIn("Worktrees and CodeGraph", text)
+
+    def test_invariants_block_present_in_both_modes(self) -> None:
+        off = self.render(self.cfg(worktrees=False))
+        on = self.render(self.cfg(worktrees=True))
+        # The contract-invariants fragment is part of the always-on `rules`
+        # module and must show up exactly once in both renderings.
+        self.assertEqual(off.count("**Invariants:**"), 1)
+        self.assertEqual(on.count("**Invariants:**"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

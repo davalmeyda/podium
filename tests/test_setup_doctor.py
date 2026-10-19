@@ -263,6 +263,32 @@ class DoctorRunTests(unittest.TestCase):
         _, output = self._capture(config=config)
         self.assertIn("[WARN] memory", output)
 
+    def test_worktrees_enabled_without_git_fails(self) -> None:
+        # Replace PATH with an empty directory: ``git`` is not findable.
+        empty = self.tmp / "empty_path"
+        empty.mkdir()
+        os.environ["PATH"] = str(empty)
+        config = {"modules": {"worktrees": True}}
+        rc, output = self._capture(config=config)
+        self.assertEqual(rc, 3)
+        self.assertIn("[FAIL] git cli", output)
+        self.assertIn("worktrees module needs git", output)
+
+    def test_worktrees_enabled_with_git_passes(self) -> None:
+        # setUp() pre-populated ``stubs/`` with a fake ``git`` script.
+        config = {"modules": {"worktrees": True}}
+        rc, output = self._capture(config=config)
+        self.assertIn("[OK] git cli", output)
+
+    def test_worktrees_disabled_skips_git_check(self) -> None:
+        # No git on PATH, but the module is off → no git line at all.
+        empty = self.tmp / "empty_path"
+        empty.mkdir()
+        os.environ["PATH"] = str(empty)
+        config = {"modules": {"worktrees": False}}
+        rc, output = self._capture(config=config)
+        self.assertNotIn("git cli", output)
+
 
 if __name__ == "__main__":
     unittest.main()

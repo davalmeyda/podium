@@ -111,6 +111,18 @@ def save_decisions(paths, state):
     os.replace(tmp, path)
 
 
+def is_worktree(root):
+    """True when `root` looks like a git worktree: a `<root>/.git` file whose
+    content is a `gitdir: .../.git/worktrees/<name>` pointer. Any OSError while
+    reading the pointer (missing, unreadable, or `<root>/.git` is a directory)
+    returns False: only the git worktree layout should be detected here."""
+    try:
+        with open(os.path.join(root, ".git"), "r", encoding="utf-8") as f:
+            return "/worktrees/" in f.read()
+    except OSError:
+        return False
+
+
 def indexed(path, roots, home):
     """True if `path` has a .codegraph ancestor (or itself) inside HOME, which
     is exclusive, or inside a configured root, which is inclusive."""
@@ -278,7 +290,9 @@ def gate(data, paths, runtime, locale, yes, no):
         decision = state["decisions"].get(root)
         if decision == "skip":
             continue
-        if decision == "index":
+        if runtime.get("codegraph", {}).get("worktrees", False) and is_worktree(root):
+            reason = locale["gate"]["deny_worktree"].format(root=root)
+        elif decision == "index":
             reason = locale["gate"]["deny_index_pending"].format(root=root)
         else:
             reason = locale["gate"]["deny_pending"].format(root=root, yes=yes, no=no)

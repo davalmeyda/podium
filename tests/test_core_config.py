@@ -18,7 +18,7 @@ class ConfigTest(unittest.TestCase):
     def test_empty_config_gets_every_default(self):
         cfg = load_text("schema = 1\n")
         self.assertEqual(cfg["language"]["response"], "en")
-        self.assertTrue(all(cfg["modules"].values()))
+        self.assertEqual(cfg["modules"], {name: name != "worktrees" for name in config.MODULES})
         self.assertEqual(cfg["launcher"]["opencode"], "opencode run --auto")
         self.assertEqual(cfg["memory"]["stop_hook"], {"min_edits": 8, "min_executor_runs": 2,
                                                       "cooldown_seconds": 2700})
@@ -139,6 +139,28 @@ class ConfigTest(unittest.TestCase):
         cfg = load_text("[modules]\nusage = false\n")
         self.assertTrue(config.module_enabled(cfg, "rules"))
         self.assertFalse(config.module_enabled(cfg, "usage"))
+
+    def test_worktrees_module_defaults_to_false_with_node_modules_link(self):
+        cfg = load_text("schema = 1\n")
+        self.assertFalse(cfg["modules"]["worktrees"])
+        # Every other module is on by default.
+        self.assertTrue(all(
+            cfg["modules"][name] for name in config.MODULES if name != "worktrees"
+        ))
+        # The opt-in module carries its own [worktrees] table with the
+        # default symlink list.
+        self.assertEqual(cfg["worktrees"]["link"], ["node_modules"])
+
+    def test_worktrees_module_can_be_opted_in(self):
+        cfg = load_text("schema = 1\n[modules]\nworktrees = true\n")
+        self.assertTrue(cfg["modules"]["worktrees"])
+        self.assertEqual(cfg["worktrees"]["link"], ["node_modules"])
+
+    def test_worktrees_link_with_a_non_list_value_is_a_configerror(self):
+        # DEFAULTS for [worktrees] defines link as a list-of-strings; config
+        # validation rejects non-list values before merge completes.
+        with self.assertRaises(config.ConfigError):
+            load_text("schema = 1\n[worktrees]\nlink = \"node_modules\"\n")
 
 
 if __name__ == "__main__":

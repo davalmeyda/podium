@@ -1,0 +1,1 @@
+**Worktrees and CodeGraph:** right after `podium worktree create`, run `codegraph init <worktree>` (it ignores the linked dependency folders); no executor works there until the index exists, and every brief names the worktree as `projectPath`. The CodeGraph gate never asks the user about a git worktree: it blocks it until the index exists.

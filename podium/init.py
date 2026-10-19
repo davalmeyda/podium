@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from podium import config
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -46,10 +48,12 @@ ANSWER_KEYS: tuple[str, ...] = (
     "roster_preset",
     "adopt",
     "overwrite",
+    "worktrees",
 )
 
 # Defaults for an entirely clean install. Match the schema in §4.
 _LANGUAGE_DEFAULTS = {"response": "en", "domain": "en", "ui": "en"}
+# Default-on modules; the opt-in ``worktrees`` has its own yes/no question.
 _MODULES_DEFAULT: tuple[str, ...] = (
     "rules", "executors", "codegraph", "memory", "usage", "upgrade",
 )
@@ -241,6 +245,19 @@ def _gather_answers(
         _ask("Roster preset (opencode-multi|claude-only|custom)", preset_default, interactive=interactive),
     )
 
+    # worktrees (opt-in): explicit answer, else listed in modules, else ask (default no).
+    if "worktrees" in base:
+        resolved["worktrees"] = bool(base["worktrees"])
+    elif "worktrees" in (resolved.get("modules") or []):
+        resolved["worktrees"] = True
+    else:
+        resolved["worktrees"] = _ask_bool(
+            "Let the principal develop in git worktrees "
+            "(parallel work outside the main checkout; opt-in)",
+            False,
+            interactive=interactive,
+        )
+
     # adopt / overwrite flags
     resolved["adopt"] = bool(
         base.get(
@@ -273,10 +290,14 @@ def _header_block(resolved: Mapping[str, Any]) -> str:
         f"domain = {json_dump_str(resolved['language.domain'])}\n"
         f"ui = {json_dump_str(resolved['language.ui'])}\n"
     )
+    enabled_in_modules = list(resolved.get("modules") or [])
+    worktrees_on = bool(resolved.get("worktrees"))
     modules_lines = [
-        f"{name} = {str(bool(name in resolved['modules'])).lower()}"
-        for name in _MODULES_DEFAULT
+        f"{name} = {str(name in enabled_in_modules).lower()}"
+        for name in config.MODULES
+        if name != "worktrees"
     ]
+    modules_lines.append(f"worktrees = {str(worktrees_on).lower()}")
     principal = (
         "always_background = true\n"
         "subagents_preauthorized = true\n"
@@ -291,6 +312,24 @@ def _header_block(resolved: Mapping[str, Any]) -> str:
     sections.append("[principal]\n" + principal)
     sections.append("[launcher]\n" + launcher)
     return "\n".join(sections)
+
+
+def _worktrees_block(resolved: Mapping[str, Any]) -> str:
+    """Render the ``[worktrees]`` table when the module is enabled, else ``""``.
+
+    Carries the folder list the principal symlinks from the main checkout
+    into each worktree so dependencies are not duplicated on disk.
+    """
+    if not resolved.get("worktrees"):
+        return ""
+    link = ["node_modules"]
+    lines = [
+        "# folders symlinked from the main checkout into each worktree",
+        "[worktrees]",
+        "link = [" + ", ".join(json_dump_str(item) for item in link) + "]",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def _memory_block(resolved: Mapping[str, Any]) -> str:
@@ -340,6 +379,9 @@ def _render(home: Path, resolved: Mapping[str, Any]) -> str:
     memory = _memory_block(resolved)
     if memory:
         parts.append(memory)
+    worktrees = _worktrees_block(resolved)
+    if worktrees:
+        parts.append(worktrees)
     parts.append(_presets_block(home, resolved))
     return "\n".join(parts)
 

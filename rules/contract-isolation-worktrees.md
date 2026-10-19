@@ -1,0 +1,1 @@
+- *Same file, separate regions:* cheap options first—one executor owns the hot file, or the principal absorbs those few lines during reconciliation (typical examples: module registrations, barrels, routes). When the overlap is extensive or the change is structural, that side moves to a **worktree** (see "Worktrees" below).

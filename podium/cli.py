@@ -72,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("update", help="move the checkout to the latest release and re-run install")
     p.add_argument("--dry-run", action="store_true", help="show the target release, change nothing")
+
+    p = sub.add_parser("worktree", help="create, integrate or clean a git worktree for parallel work")
+    p.add_argument("action", choices=("create", "integrate", "clean"))
+    p.add_argument("repo")
+    p.add_argument("task")
+    p.add_argument("files", nargs="*")
     return parser
 
 
@@ -325,6 +331,28 @@ def cmd_update(args: argparse.Namespace, paths: paths_mod.Paths, env: Mapping[st
     return cmd_install(install_args, paths, env)
 
 
+def cmd_worktree(args: argparse.Namespace, paths: paths_mod.Paths, env: Mapping[str, str]) -> int:
+    """Hand the action off to ``scripts/worktree.sh``; we never touch git ourselves."""
+    if args.files and args.action != "create":
+        _err("files are only allowed with the `create` action")
+        return EXIT_USER
+    try:
+        config = config_mod.load(paths.config_dir, env)
+        links = list(config["worktrees"]["link"])
+    except (config_mod.ConfigError, KeyError, TypeError):
+        links = list(config_mod.DEFAULTS["worktrees"]["link"])
+    bash = shutil.which("bash", path=env.get("PATH", os.defpath))
+    if bash is None:
+        raise targets.EnvError("bash is not installed")
+    script = paths.podium_home / "scripts" / "worktree.sh"
+    run_env = dict(env)
+    run_env["PODIUM_STATE_DIR"] = str(paths.state_dir)
+    run_env["PODIUM_WORKTREE_LINKS"] = " ".join(links)
+    proc = subprocess.run([bash, str(script), args.action, args.repo, args.task, *args.files],
+                          env=run_env)
+    return proc.returncode
+
+
 COMMANDS = {
     "detect": cmd_detect,
     "init": cmd_init,
@@ -335,6 +363,7 @@ COMMANDS = {
     "doctor": cmd_doctor,
     "uninstall": cmd_uninstall,
     "update": cmd_update,
+    "worktree": cmd_worktree,
 }
 
 

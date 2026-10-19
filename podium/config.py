@@ -15,7 +15,9 @@ except ImportError:  # pragma: no cover - exercised only on Python < 3.11
 SCHEMA_VERSION = 1
 CONFIG_FILENAME = "podium.toml"
 
-MODULES = ("rules", "executors", "codegraph", "memory", "usage", "upgrade")
+MODULES = ("rules", "executors", "codegraph", "memory", "usage", "upgrade", "worktrees")
+# Opt-in modules: disabled unless podium.toml enables them.
+OPT_IN_MODULES = ("worktrees",)
 ROLES = ("writer", "consultant", "overflow")
 LAUNCH_KINDS = ("opencode", "claude", "principal")
 UI_LOCALES = ("en", "es")
@@ -34,7 +36,7 @@ FREE = _Free()
 
 DEFAULTS: Dict[str, Any] = {
     "language": {"response": "en", "domain": "en", "ui": "en"},
-    "modules": {name: True for name in MODULES},
+    "modules": {name: name not in OPT_IN_MODULES for name in MODULES},
     "principal": {
         "always_background": True,
         "subagents_preauthorized": True,
@@ -59,6 +61,7 @@ DEFAULTS: Dict[str, Any] = {
         "extra_ignored": [],
     },
     "usage": {"model_order": ["opus", "sonnet", "haiku", "gpt", "minimax"]},
+    "worktrees": {"link": ["node_modules"]},
     "render": {"vars": FREE},
 }
 

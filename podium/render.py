@@ -88,8 +88,16 @@ def _has_opencode_executors(config: Mapping[str, Any]) -> bool:
     return any((row.get("launch") or {}).get("kind") == "opencode" for row in config.get("roster") or [])
 
 
+def _worktrees(config: Mapping[str, Any]) -> bool:
+    return bool(config.get("modules", {}).get("worktrees", False))
+
+
 # `requires = "<name>"` on a manifest fragment: rendered only when the predicate holds.
-_REQUIREMENTS = {"opencode-executors": _has_opencode_executors}
+_REQUIREMENTS = {
+    "opencode-executors": _has_opencode_executors,
+    "worktrees": _worktrees,
+    "no-worktrees": lambda config: not _worktrees(config),
+}
 
 
 class _Generated:

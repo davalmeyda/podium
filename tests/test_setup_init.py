@@ -226,5 +226,65 @@ class InitValidationTests(InitBase):
             init.run(self.paths, _baseline_answers("../escape"))
 
 
+class InitWorktreesTests(InitBase):
+    """The opt-in ``worktrees`` module wires through init and the file loads."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A tiny preset that round-trips so the install can complete.
+        _install_preset(
+            Path(self.paths["home"]),
+            "opencode-multi",
+            '[[agents]]\nname = "minimax"\nrole = "writer"\n'
+            'model = "minimax/MiniMax-M3"\ndescription = "m"\n',
+        )
+
+    def test_worktrees_true_emits_table_and_loads(self) -> None:
+        from podium import config as config_mod
+
+        answers = _baseline_answers("opencode-multi")
+        answers["worktrees"] = True
+        out = init.run(self.paths, answers)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("worktrees = true", text)
+        self.assertIn("[worktrees]", text)
+        self.assertIn("link = [\"node_modules\"]", text)
+        # The file must round-trip through the real config loader.
+        loaded = config_mod.load(Path(self.paths["config_dir"]), {})
+        self.assertTrue(loaded["modules"]["worktrees"])
+        self.assertEqual(loaded["worktrees"]["link"], ["node_modules"])
+
+    def test_worktrees_absent_defaults_false_no_table(self) -> None:
+        from podium import config as config_mod
+
+        out = init.run(self.paths, _baseline_answers("opencode-multi"))
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("worktrees = false", text)
+        self.assertNotIn("[worktrees]", text)
+        loaded = config_mod.load(Path(self.paths["config_dir"]), {})
+        self.assertFalse(loaded["modules"]["worktrees"])
+        self.assertEqual(loaded["worktrees"]["link"], ["node_modules"])
+
+    def test_modules_list_enabling_worktrees_enables_module(self) -> None:
+        # The brief allows enabling worktrees via answers["modules"]. The
+        # modules-list prompt itself still does not offer ``worktrees``.
+        from podium import config as config_mod
+
+        answers = _baseline_answers("opencode-multi")
+        answers["modules"] = list(answers["modules"]) + ["worktrees"]
+        out = init.run(self.paths, answers)
+        text = out.read_text(encoding="utf-8")
+        self.assertIn("worktrees = true", text)
+        self.assertIn("[worktrees]", text)
+        loaded = config_mod.load(Path(self.paths["config_dir"]), {})
+        self.assertTrue(loaded["modules"]["worktrees"])
+
+    def test_modules_list_does_not_offer_worktrees_as_default(self) -> None:
+        # The default list must stay at six items; adding "worktrees" to it
+        # is a caller-side opt-in, not something _ask_list ever suggests.
+        self.assertNotIn("worktrees", init._MODULES_DEFAULT)
+        self.assertEqual(len(init._MODULES_DEFAULT), 6)
+
+
 if __name__ == "__main__":
     unittest.main()

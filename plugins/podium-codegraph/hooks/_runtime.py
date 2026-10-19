@@ -138,6 +138,7 @@ _REQUIRED_LOCALE_KEYS = (
     ("labels", "no"),
     ("gate", "deny_pending"),
     ("gate", "deny_index_pending"),
+    ("gate", "deny_worktree"),
     ("nudge", "available"),
 )
 
@@ -185,6 +186,7 @@ def _builtin_locale():
         "gate": {
             "deny_pending": "Project {root} is not indexed with CodeGraph and the user has not decided whether to index it. BEFORE working on it, ask the user with AskUserQuestion. The question must contain the word 'CodeGraph' and the path '{root}', with exactly these two options: '{yes}' and '{no}'. If you are a subagent without AskUserQuestion, stop and report to the principal that this decision is missing. Running or querying a `codegraph ...` command is never blocked.",
             "deny_index_pending": "The user approved indexing {root} with CodeGraph but the index does not exist yet. Run `codegraph init {root}` now (in background if the project is large) before working on that project.",
+            "deny_worktree": "{root} is a git worktree: it is always indexed, without asking the user. Run `codegraph init {root}` now and wait for it to finish before working there.",
         },
     }
 

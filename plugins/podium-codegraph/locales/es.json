@@ -13,6 +13,7 @@
   },
   "gate": {
     "deny_pending": "El proyecto {root} no está indexado con CodeGraph y el usuario todavía no decidió si indexarlo. ANTES de trabajar en él, preguntale al usuario con AskUserQuestion. La pregunta debe contener literalmente 'CodeGraph' y la ruta '{root}', con exactamente estas dos opciones: '{yes}' y '{no}'. Si sos un subagente sin AskUserQuestion, detenete y reportá al principal que falta esta decisión. Indexar o consultar con un comando `codegraph ...` no se bloquea.",
-    "deny_index_pending": "El usuario aprobó indexar {root} con CodeGraph pero el índice aún no existe. Ejecutá ahora `codegraph init {root}` (en background si es grande) antes de trabajar en ese proyecto."
+    "deny_index_pending": "El usuario aprobó indexar {root} con CodeGraph pero el índice aún no existe. Ejecutá ahora `codegraph init {root}` (en background si es grande) antes de trabajar en ese proyecto.",
+    "deny_worktree": "{root} es un worktree de git: se indexa siempre, sin preguntar al usuario. Ejecutá ahora `codegraph init {root}` y esperá a que termine antes de trabajar ahí."
   }
 }

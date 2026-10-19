@@ -43,6 +43,8 @@ memory = true
 usage = true
 # upgrade: agents-upgrade skill + POSIX upgrade scripts.
 upgrade = true
+# worktrees: opt-in: lets the principal develop in git worktrees (podium worktree)
+worktrees = false
 
 # ---------- principal ------------------------------------------------------
 # Principal-only orchestration knobs. These never apply to executors.
@@ -241,3 +243,7 @@ model_order = ["opus", "sonnet", "haiku", "gpt", "minimax"]
 [render]
 # vars: free values injected into templates as `{{ vars.<key> }}`.
 vars = {}
+
+# ---------- worktrees (optional, only when modules.worktrees = true) --------
+# [worktrees]
+# link = ["node_modules"]

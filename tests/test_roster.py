@@ -418,8 +418,10 @@ class PresetFileTests(unittest.TestCase):
         self.assertEqual(data["language"]["domain"], "en")
         self.assertEqual(data["language"]["ui"], "en")
         for module_name, enabled in data["modules"].items():
-            self.assertTrue(
-                enabled, f"example profile must enable {module_name}"
+            # Opt-in modules stay off in the example; every other one is on.
+            self.assertEqual(
+                enabled, module_name != "worktrees",
+                f"example profile has the wrong default for {module_name}",
             )
         self.assertEqual(data["memory"]["url"], "${PODIUM_GRAPHITI_URL}")
 
