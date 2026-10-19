@@ -1,6 +1,6 @@
 {
   "name": "podium-usage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tokens consumed by this session: Claude (with subagents and compactions) and the opencode runs it launched.",
   "license": "MIT",
   "types": "./types/index.d.ts"
