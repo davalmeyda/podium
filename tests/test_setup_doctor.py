@@ -143,12 +143,26 @@ class DoctorRunTests(unittest.TestCase):
         os.environ["PATH"] = str(empty)
         config = {
             "modules": {"rules": True, "executors": True, "codegraph": True},
+            "agents": [{"name": "writer", "role": "writer"}],
         }
         rc, output = self._capture(config=config)
         self.assertEqual(rc, 3)
         self.assertIn("[FAIL] claude cli", output)
         self.assertIn("[FAIL] opencode cli", output)
         self.assertIn("[FAIL] codegraph cli", output)
+
+    def test_opencode_optional_for_a_claude_only_roster(self) -> None:
+        empty = self.tmp / "empty_path"
+        empty.mkdir()
+        os.environ["PATH"] = str(empty)
+        config = {
+            "modules": {"rules": True, "executors": True},
+            "roster": [{"id": "principal", "launch": {"kind": "principal"}}],
+            "agents": [],
+        }
+        rc, output = self._capture(config=config)
+        self.assertIn("[FAIL] claude cli", output)
+        self.assertIn("[OK] opencode cli: not installed", output)
 
     def test_legacy_hooks_with_podium_plugin_fails(self) -> None:
         config = {

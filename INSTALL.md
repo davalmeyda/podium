@@ -26,7 +26,7 @@ sh ~/.local/share/podium/repo/plugins/podium-upgrade/skills/agents-upgrade/scrip
 ```
 
 Show the user the commands and run the script without `--dry-run` once they
-agree. If OpenCode is not installed and the user wants executors, offer the
+agree. Recommend updating: podium is tested against the latest releases. If OpenCode is not installed and the user wants executors, offer the
 official installer, then the jump to the current major:
 
 ```sh

@@ -90,9 +90,14 @@ def _check_module_deps(modules: Mapping[str, Any]) -> None:
 
     if modules.get("rules") or modules.get("executors"):
         for name in ("claude", "opencode"):
+            # OpenCode is required only when the roster launches OpenCode executors.
+            required = name == "claude" or modules.get("needs_opencode", True)
             path = shutil.which(name)
             if path is None:
-                _record(_Severity.FAIL, f"{name} cli", "not found on PATH")
+                if required:
+                    _record(_Severity.FAIL, f"{name} cli", "not found on PATH")
+                else:
+                    _record(_Severity.OK, f"{name} cli", "not installed (no OpenCode executors in the roster)")
                 continue
             # The contract says >= 2; we accept anything parseable as a best
             # effort and warn unless the major version is at least 2.
@@ -365,6 +370,11 @@ def run(paths: Mapping[str, Any], config: Mapping[str, Any]) -> int:
     memory_section = config.get("memory") if isinstance(config, Mapping) else {}
     if isinstance(memory_section, Mapping):
         modules = {**modules, "memory_url": memory_section.get("url") or ""}
+    if isinstance(config, Mapping):
+        rows = config.get("roster") or []
+        modules = {**modules, "needs_opencode": bool(config.get("agents")) or any(
+            isinstance(row, Mapping) and isinstance(row.get("launch"), Mapping)
+            and row["launch"].get("kind") == "opencode" for row in rows)}
     _check_module_deps(modules)
 
     # runtime.json
