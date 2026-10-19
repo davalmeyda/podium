@@ -1,0 +1,243 @@
+# podium.toml — example profile
+#
+# This file is the single source of truth for a podium install. It declares
+# which modules are enabled, which agents form the cascade, how the principal
+# orchestrates them, and how memory/CodeGraph/usage helpers are wired up.
+#
+# Editing rules:
+# - Unknown keys are errors (validated against ARCHITECTURE.md §4).
+# - Every section has defaults, so a minimal `podium.toml` only needs
+#   `schema = 1`.
+# - `${VAR}` placeholders are expanded from the environment at install time;
+#   an unset variable aborts the run and names the variable.
+
+schema = 1
+
+# ---------- language -------------------------------------------------------
+# languages configures three distinct locales so that the principal can be
+# tuned per audience without changing the agent's operating language.
+[language]
+# response: the language the agents answer the user in (UI of the responses).
+response = "en"
+# domain: the language for code identifiers and user-visible domain text
+# (commit messages, code comments, error identifiers). Independent from
+# `response` so a Spanish-speaking team can still keep code in English.
+domain = "en"
+# ui: the locale of podium's own UI strings (hook labels, mod labels).
+# Loaded from `locales/<ui>.json`; supported: "en", "es".
+ui = "en"
+
+# ---------- modules --------------------------------------------------------
+# Each module can be enabled or disabled independently. A disabled module
+# is skipped at render time and the matching plugin is not installed.
+[modules]
+# rules: fragment-based rules pipeline (CLAUDE.md / AGENTS.md managed blocks).
+rules = true
+# executors: executor profile, agent files, role preambles, scripts.
+executors = true
+# codegraph: CodeGraph gate hooks and indexing recommendations.
+codegraph = true
+# memory: graphiti-memory MCP and the stop hook (saves work-log entries).
+memory = true
+# usage: token-usage mod + scripts/session_usage.py.
+usage = true
+# upgrade: agents-upgrade skill + POSIX upgrade scripts.
+upgrade = true
+
+# ---------- principal ------------------------------------------------------
+# Principal-only orchestration knobs. These never apply to executors.
+[principal]
+# always_background: launch every agent in a background process so the main
+# thread stays free for the principal's own reasoning.
+always_background = true
+# subagents_preauthorized: the principal may spawn executors without an
+# extra permission round-trip.
+subagents_preauthorized = true
+# forbid_workflow_tool: orchestration stays on the main thread (no
+# "workflow" or task-spawning shortcuts).
+forbid_workflow_tool = true
+
+# ---------- launcher --------------------------------------------------------
+# `launch_examples` in the rules text use this prefix verbatim.
+[launcher]
+opencode = "opencode run --auto"
+
+# ---------- roster (opencode-multi preset, inlined) -----------------------
+# Each `[[roster]]` row is one entry of the public cascade table. Order is
+# preserved by the renderer: principal first, then executors in priority
+# order, then the last-resort fallback.
+#
+# `kind` accepts:
+#   - "opencode": OpenCode agent file (`agent`, `model`, `variant`).
+#   - "claude":   Claude Code native dispatch (`model`, optional `effort`).
+#   - "principal": in-process principal (no extra fields).
+[[roster]]
+id = "principal"
+engine = "Claude principal"
+model = "session"
+responsibility = "Plan, decisions, briefs, reconciliation, verdict"
+fallback = "—"
+launch = { kind = "principal" }
+
+[[roster]]
+id = "minimax-fast"
+engine = "MiniMax fast"
+model = "MiniMax-M3 #none"
+responsibility = "Code from a closed brief, mechanical refactors, run and fix validations, checklist reviews"
+fallback = "haiku → luna"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "none" }
+
+[[roster]]
+id = "minimax-diagnostics"
+engine = "MiniMax fast"
+model = "MiniMax-M3 #none"
+responsibility = "Run builds, test suites, logs and seeds; return only the diagnosis"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "none" }
+
+[[roster]]
+id = "minimax-thinking"
+engine = "MiniMax fast / thinking"
+model = "MiniMax-M3 #thinking"
+responsibility = "Code or reading with context > 100K"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "thinking" }
+
+[[roster]]
+id = "sonnet-coupled"
+engine = "Claude native"
+model = "sonnet (effort high)"
+responsibility = "Contracts and coupled logic"
+fallback = "sol high"
+launch = { kind = "claude", model = "sonnet", effort = "high" }
+
+[[roster]]
+id = "sonnet-scout"
+engine = "Claude native"
+model = "sonnet (effort high)"
+responsibility = "Pre-split scout (split map)"
+fallback = "MiniMax #thinking"
+launch = { kind = "claude", model = "sonnet", effort = "high" }
+
+[[roster]]
+id = "haiku-explore"
+engine = "Claude native"
+model = "haiku"
+responsibility = "Bounded exploration and extraction, informational questions"
+fallback = "MiniMax #none"
+launch = { kind = "claude", model = "haiku" }
+
+[[roster]]
+id = "sol-diagnosis"
+engine = "GPT (agent sol)"
+model = "gpt-6.1-sol #high"
+responsibility = "Diagnosis, review with judgement, second opinion"
+fallback = "sonnet (effort high)"
+launch = { kind = "opencode", agent = "sol", model = "openai/gpt-6.1-sol", variant = "high" }
+
+[[roster]]
+id = "sol-verdict"
+engine = "GPT (agent sol)"
+model = "gpt-6.1-sol #xhigh"
+responsibility = "High-risk architecture verdict, no code"
+fallback = "opus (effort high, separate consult)"
+launch = { kind = "opencode", agent = "sol", model = "openai/gpt-6.1-sol", variant = "xhigh" }
+
+[[roster]]
+id = "luna-overflow"
+engine = "GPT (agent luna)"
+model = "gpt-6-luna #high"
+responsibility = "Overflow of mechanical code in wide phases"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "luna", model = "openai/gpt-6-luna", variant = "high" }
+
+[[roster]]
+id = "sonnet-capacity"
+engine = "Claude native"
+model = "sonnet"
+responsibility = "Last fallback by capacity"
+fallback = "—"
+launch = { kind = "claude", model = "sonnet" }
+
+# ---------- agents (opencode-multi preset, inlined) -----------------------
+# One `[[agents]]` per OpenCode agent file generated into
+# `opencode_config_dir/agents/<name>.md`. Roles drive the permission
+# skeleton (writer/consultant/overflow — see ARCHITECTURE.md §6).
+[[agents]]
+name = "minimax"
+role = "writer"
+model = "minimax/MiniMax-M3"
+description = "MiniMax-M3 executor — default code executor of the cascade."
+deny_mcp = ["chrome-devtools_*"]
+
+[[agents]]
+name = "sol"
+role = "consultant"
+model = "openai/gpt-6.1-sol"
+description = "GPT-6.1 Sol consultant — diagnosis, review with judgement, second opinion, and architecture verdict."
+deny_mcp = ["chrome-devtools_*"]
+
+[[agents]]
+name = "luna"
+role = "overflow"
+model = "openai/gpt-6-luna"
+description = "GPT-6 Luna executor — overflow of mechanical code in wide phases."
+deny_mcp = ["chrome-devtools_*"]
+
+# ---------- roster notes ---------------------------------------------------
+# Below-table annotations the renderer turns into bullet lists.
+[roster_notes]
+# excluded: `model — reason` lines for entries the user has removed from
+# the live cascade (kept here as historical record).
+excluded = []
+# cascade: human-readable fallback chains, one per recurring task type.
+cascade = [
+  "Closed-brief code: MiniMax → haiku → Luna",
+  "Contracts/coupled logic: sonnet → Sol high",
+  "Verbose output and context > 100K: MiniMax → haiku",
+  "Exploration: haiku → MiniMax",
+  "Scout: sonnet → MiniMax thinking",
+  "Overflow: Luna → haiku",
+  "Diagnosis, review, second opinion: Sol high → sonnet high",
+  "Verdict: Sol xhigh → opus high",
+]
+
+# ---------- memory ---------------------------------------------------------
+# graphiti-memory MCP wiring and stop-hook thresholds.
+[memory]
+backend = "graphiti"
+mcp_server = "graphiti-memory"
+# `${PODIUM_GRAPHITI_URL}` is expanded at install time from the env var of
+# the same name; an unset variable aborts the run.
+url = "${PODIUM_GRAPHITI_URL}"
+group = "main"
+# Extra HTTP headers for the memory MCP server, e.g. { Host = "localhost:8000" } behind a proxy.
+headers = {}
+# Extra scalar keys copied into the OpenCode MCP entry, e.g. { timeout = 180000, oauth = false }.
+mcp_options = {}
+stop_hook = { min_edits = 8, min_executor_runs = 2, cooldown_seconds = 2700 }
+
+# ---------- codegraph ------------------------------------------------------
+[codegraph]
+# gate: enable the PreToolUse gate that redirects agents to the index
+# before they read/grep unknown files.
+gate = true
+# nudge_every: emit a "use CodeGraph" nudge every N gate denials.
+nudge_every = 4
+# roots: extra project roots the index should track beside $HOME.
+roots = []
+# extra_manifests: user-added manifest paths for monorepos.
+extra_manifests = []
+# extra_ignored: extra `codegraph ignored` patterns.
+extra_ignored = []
+
+# ---------- usage ----------------------------------------------------------
+[usage]
+# model_order: regex fragments matching tokens seen in session_usage.py
+# output; ordered for display in the token-usage mod.
+model_order = ["opus", "sonnet", "haiku", "gpt", "minimax"]
+
+# ---------- render ---------------------------------------------------------
+[render]
+# vars: free values injected into templates as `{{ vars.<key> }}`.
+vars = {}

@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag matches the code version
+        run: python scripts/check-versions.py --tag "${GITHUB_REF_NAME}"
+      - name: Unit tests
+        run: python -m unittest discover -s tests
+      - name: Build archive
+        run: |
+          name="podium-${GITHUB_REF_NAME}"
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="${name}/" -o "dist/${name}.tar.gz" "${GITHUB_REF_NAME}"
+          cp install.sh dist/install.sh
+          (cd dist && sha256sum * > SHA256SUMS)
+      - name: Release notes from CHANGELOG
+        run: python scripts/changelog-section.py "${GITHUB_REF_NAME}" > dist/NOTES.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/install.sh dist/SHA256SUMS \
+            --title "podium ${GITHUB_REF_NAME}" --notes-file dist/NOTES.md

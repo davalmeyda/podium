@@ -1,0 +1,6 @@
+{
+  "stop": {
+    "reason": "Substantial work happened since the last memory save ({edits} file edits, {executors} executor runs). Without calling any tools, decide: would a future session do something wrong or redo work without a log entry (completed milestone, decision + reason, pending work / next step, non-obvious fix)? If yes, load the `podium-memory:project-memory` skill and save ONE dense entry covering everything since the last save, then tell the user in one line. If there is nothing worth recording, reply only with \"Nothing to record in memory.\" and stop.",
+    "nothing_to_record": "Nothing to record in memory."
+  }
+}

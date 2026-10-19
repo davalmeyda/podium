@@ -1,0 +1,93 @@
+name: Bug report
+description: Report a reproducible bug in podium itself (the CLI, a hook, a plugin, or a preset).
+title: "[bug] "
+labels: ["bug"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in the sections below — the more
+        information you give, the easier it is to reproduce and fix.
+
+  - type: input
+    id: version
+    attributes:
+      label: podium version
+      description: "Output of `podium --version` (or `bin/podium --help` if you run from a checkout)."
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: "Distribution and version (for Linux) or macOS version. Both must be supported (see docs/ARCHITECTURE.md §1)."
+      placeholder: "Ubuntu 24.04 / macOS 15.4"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: "Output of `python3 --version`. Must be >= 3.8."
+      placeholder: "Python 3.12.3"
+    validations:
+      required: true
+
+  - type: input
+    id: agent_versions
+    attributes:
+      label: Agent / harness versions
+      description: "Versions of Claude Code and OpenCode you are running. Use `claude --version` and `opencode --version`."
+      placeholder: "claude 1.0.0, opencode 0.45.1"
+    validations:
+      required: false
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `podium doctor` output
+      description: "Paste the output of `podium doctor`. If the command fails to run, paste the exact error."
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: "A numbered list of the exact commands or actions that trigger the bug, starting from a clean `config_dir`."
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: "What you expected to see instead."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: "What actually happened, including the full output, log lines and any error messages. Sanitise any paths or tokens before pasting."
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: "Optional. Logs, screenshots, environment details, or things you tried that did not work."
+    validations:
+      required: false

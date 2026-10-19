@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an addition to podium or a change to an existing capability.
+title: "[feature] "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests help shape the roadmap. Please explain the problem
+        you are solving before the proposed solution — that way we can
+        evaluate alternatives together.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What is the user-facing problem or workflow gap you are trying to solve?"
+      placeholder: |
+        I'm always frustrated when…
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: "A clear description of what you would like podium to do. Include the rough UI, command, or template snippet if you can."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: "Other ways to address the same problem, including the workaround you currently use."
+    validations:
+      required: false
+
+  - type: input
+    id: module
+    attributes:
+      label: Affected module
+      description: "Which area of the codebase does this touch? Pick the closest match."
+      placeholder: "rules / hooks / plugins/podium-codegraph / plugins/podium-memory / plugins/podium-usage / plugins/podium-upgrade / CLI / docs / preset"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: "Optional. Links, screenshots, mock-ups, or examples from other tools."
+    validations:
+      required: false

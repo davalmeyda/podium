@@ -1,0 +1,11 @@
+{
+  "name": "podium",
+  "owner": { "name": "podium contributors" },
+  "description": "podium: rules, hooks, skills and mods for orchestrating a team of AI coding agents.",
+  "plugins": [
+    { "name": "podium-codegraph", "source": "./plugins/podium-codegraph", "description": "Gate and nudge hooks that make agents read code through a CodeGraph index first." },
+    { "name": "podium-memory", "source": "./plugins/podium-memory", "description": "Shared work-log protocol (project-memory skill) and a Stop hook that asks to record milestones." },
+    { "name": "podium-usage", "source": "./plugins/podium-usage", "description": "Token usage pane and status line for the session, including subagents and OpenCode executors." },
+    { "name": "podium-upgrade", "source": "./plugins/podium-upgrade", "description": "agents-upgrade skill: research models and plans, then update the podium roster." }
+  ]
+}

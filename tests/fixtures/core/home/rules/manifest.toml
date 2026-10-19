@@ -1,0 +1,25 @@
+[[target]]
+id = "claude-md"
+title = "fixture rules"
+fragments = [
+  { id = "alpha", module = "rules" },
+  { id = "beta", module = "rules" },
+  { id = "gamma", module = "memory" },
+  { id = "delta", module = "codegraph" },
+]
+
+[[target]]
+id = "opencode-agents-md"
+title = "fixture rules for OpenCode"
+fragments = [
+  { id = "alpha", module = "rules" },
+]
+
+[[target]]
+id = "executor-profile"
+title = "fixture executor profile"
+source = "executors/profile"
+fragments = [
+  { id = "ex-one", module = "executors" },
+  { id = "ex-two", module = "executors" },
+]

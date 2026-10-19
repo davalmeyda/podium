@@ -1,0 +1,9 @@
+## Project Rule Files
+
+At the start of each session, before the first task, check whether the project has rule files your harness does not load by itself (for example, `.cursor/rules/`). If it does, read all of them completely once and keep them in context for the entire session with the authority of `CLAUDE.md`. A direct user instruction takes precedence over a project rule.
+
+**How project rules reach executors—distill, never dump:**
+- Do NOT paste complete rules into briefs, and do NOT send agents to read project rule files (that would force them to arbitrate conflicts, and agents do not decide). The principal, having already read the rules, includes ONLY those applicable to the task in each brief, already arbitrated and applied to the case (2–4 lines: "300-line limit," "do not generate migrations," "update the `.http` file").
+- **Invariants belong in the executor profile, written once.** The executor profile enumerates them explicitly: domain literals in `{{ language.domain_name }}` quoted verbatim; the prohibition of subagents; mandatory self-validation (`tsc --noEmit`/lint/`--fix`/formatter over the executor's own files); the fixed report format (files changed, generated-code calls touched, verification commands, blockers). Do not repeat them in briefs.
+- **For the executor, the brief wins.** If a project rule contradicts the brief, the brief takes precedence—the principal has already arbitrated.
+- **Resolve project-rule vs. orchestration conflicts by preserving the intent at the phase level, using the mechanism the principal chooses.** Example: "everything must be verified" does not require six concurrent agents each to compile the entire project; satisfy it with the principal's full `tsc --noEmit` during reconciliation. No code is considered done until the rule's intent has been satisfied.

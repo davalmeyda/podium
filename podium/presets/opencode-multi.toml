@@ -1,0 +1,125 @@
+# Roster preset: appended verbatim by `podium init` below the header it writes
+# (schema, [language], [modules], [principal], [launcher]). Keep only
+# [[roster]], [[agents]] and [roster_notes] here, or the keys collide.
+
+[[roster]]
+id = "principal"
+engine = "Claude principal"
+model = "session"
+responsibility = "Plan, decisions, briefs, reconciliation, verdict"
+fallback = "—"
+launch = { kind = "principal" }
+
+[[roster]]
+id = "minimax-fast"
+engine = "MiniMax fast"
+model = "MiniMax-M3 #none"
+responsibility = "Code from a closed brief, mechanical refactors, run and fix validations, checklist reviews"
+fallback = "haiku → luna"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "none" }
+
+[[roster]]
+id = "minimax-diagnostics"
+engine = "MiniMax fast"
+model = "MiniMax-M3 #none"
+responsibility = "Run builds, test suites, logs and seeds; return only the diagnosis"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "none" }
+
+[[roster]]
+id = "minimax-thinking"
+engine = "MiniMax fast / thinking"
+model = "MiniMax-M3 #thinking"
+responsibility = "Code or reading with context > 100K"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "thinking" }
+
+[[roster]]
+id = "sonnet-coupled"
+engine = "Claude native"
+model = "sonnet (effort high)"
+responsibility = "Contracts and coupled logic"
+fallback = "sol high"
+launch = { kind = "claude", model = "sonnet", effort = "high" }
+
+[[roster]]
+id = "sonnet-scout"
+engine = "Claude native"
+model = "sonnet (effort high)"
+responsibility = "Pre-split scout (split map)"
+fallback = "MiniMax #thinking"
+launch = { kind = "claude", model = "sonnet", effort = "high" }
+
+[[roster]]
+id = "haiku-explore"
+engine = "Claude native"
+model = "haiku"
+responsibility = "Bounded exploration and extraction, informational questions"
+fallback = "MiniMax #none"
+launch = { kind = "claude", model = "haiku" }
+
+[[roster]]
+id = "sol-diagnosis"
+engine = "GPT (agent sol)"
+model = "gpt-6.1-sol #high"
+responsibility = "Diagnosis, review with judgement, second opinion"
+fallback = "sonnet (effort high)"
+launch = { kind = "opencode", agent = "sol", model = "openai/gpt-6.1-sol", variant = "high" }
+
+[[roster]]
+id = "sol-verdict"
+engine = "GPT (agent sol)"
+model = "gpt-6.1-sol #xhigh"
+responsibility = "High-risk architecture verdict, no code"
+fallback = "opus (effort high, separate consult)"
+launch = { kind = "opencode", agent = "sol", model = "openai/gpt-6.1-sol", variant = "xhigh" }
+
+[[roster]]
+id = "luna-overflow"
+engine = "GPT (agent luna)"
+model = "gpt-6-luna #high"
+responsibility = "Overflow of mechanical code in wide phases"
+fallback = "haiku"
+launch = { kind = "opencode", agent = "luna", model = "openai/gpt-6-luna", variant = "high" }
+
+[[roster]]
+id = "sonnet-capacity"
+engine = "Claude native"
+model = "sonnet"
+responsibility = "Last fallback by capacity"
+fallback = "—"
+launch = { kind = "claude", model = "sonnet" }
+
+[[agents]]
+name = "minimax"
+role = "writer"
+model = "minimax/MiniMax-M3"
+description = "MiniMax-M3 executor — default code executor of the cascade."
+deny_mcp = ["chrome-devtools_*"]
+
+[[agents]]
+name = "sol"
+role = "consultant"
+model = "openai/gpt-6.1-sol"
+description = "GPT-6.1 Sol consultant — diagnosis, review with judgement, second opinion, and architecture verdict."
+deny_mcp = ["chrome-devtools_*"]
+
+[[agents]]
+name = "luna"
+role = "overflow"
+model = "openai/gpt-6-luna"
+description = "GPT-6 Luna executor — overflow of mechanical code in wide phases."
+deny_mcp = ["chrome-devtools_*"]
+
+[roster_notes]
+cascade = [
+  "Closed-brief code: MiniMax → haiku → Luna",
+  "Contracts/coupled logic: sonnet → Sol high",
+  "Verbose output and context > 100K: MiniMax → haiku",
+  "Exploration: haiku → MiniMax",
+  "Scout: sonnet → MiniMax thinking",
+  "Overflow: Luna → haiku",
+  "Diagnosis, review, second opinion: Sol high → sonnet high",
+  "Verdict: Sol xhigh → opus high",
+]
+excluded = []

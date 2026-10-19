@@ -1,0 +1,46 @@
+# Ordered fragments per rendered target. See docs/ARCHITECTURE.md §5.
+# Rules fragments live in rules/<id>.md; executor-profile fragments in executors/profile/<id>.md.
+
+[[target]]
+id = "claude-md"
+title = "podium rules"
+fragments = [
+  { id = "habits", module = "rules" },
+  { id = "orchestration", module = "rules" },
+  { id = "roster", module = "rules" },
+  { id = "principal-decides", module = "rules" },
+  { id = "cost-model", module = "rules" },
+  { id = "context-diet", module = "rules" },
+  { id = "phases", module = "rules" },
+  { id = "contract-parallelism", module = "rules" },
+  { id = "cheap-subagents", module = "rules" },
+  { id = "review", module = "rules" },
+  { id = "second-opinion", module = "rules" },
+  { id = "project-rules", module = "rules" },
+  { id = "memory", module = "memory" },
+  { id = "codegraph", module = "codegraph" },
+]
+
+[[target]]
+id = "opencode-agents-md"
+title = "podium rules for OpenCode"
+fragments = [
+  { id = "oc-language", module = "rules" },
+  { id = "oc-memory", module = "memory" },
+  { id = "oc-codegraph", module = "codegraph" },
+]
+
+[[target]]
+id = "executor-profile"
+title = "podium executor profile"
+source = "executors/profile"
+fragments = [
+  { id = "ex-intro", module = "executors" },
+  { id = "ex-prohibitions", module = "executors" },
+  { id = "ex-how-to-work", module = "executors" },
+  { id = "ex-codegraph", module = "codegraph" },
+  { id = "ex-context", module = "executors" },
+  { id = "ex-self-validation", module = "executors" },
+  { id = "ex-language", module = "executors" },
+  { id = "ex-report", module = "executors" },
+]

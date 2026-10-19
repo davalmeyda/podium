@@ -1,0 +1,6 @@
+{
+  "stop": {
+    "reason": "Hubo trabajo importante desde el último guardado en Graphiti ({edits} ediciones de archivos, {executors} corridas del ejecutor). Sin llamar a ninguna herramienta, evaluá: ¿una sesión futura haría algo mal o repetiría trabajo sin una entrada de log (hito completado, decisión + motivo, pendiente / próximo paso, fix no obvio)? Si la respuesta es sí: cargá la skill `podium-memory:project-memory` y guardá UNA entrada densa que cubra todo lo hecho desde el último guardado, después avisale al usuario en una línea. Si no hay nada que registrar, respondé únicamente \"Nada que registrar en Graphiti.\" y detenete.",
+    "nothing_to_record": "Nada que registrar en Graphiti."
+  }
+}

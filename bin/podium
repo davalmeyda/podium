@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""podium CLI entry point: adds the checkout to sys.path and runs podium.cli.main()."""
+import os
+import sys
+
+if sys.version_info < (3, 8):
+    sys.stderr.write(
+        "podium requires Python 3.8 or newer (found %d.%d.%d).\n" % tuple(sys.version_info[:3])
+    )
+    sys.exit(3)
+
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, ROOT)
+
+from podium.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,18 @@
+{
+  "ui_language": "en",
+  "options": {
+    "index_now": "Index now",
+    "no_index": "Do not index"
+  },
+  "labels": {
+    "yes": "Index now",
+    "no": "Do not index"
+  },
+  "nudge": {
+    "available": "CodeGraph index available ({roots}). To understand or locate code, prefer `codegraph_explore` (projectPath = the index root) over grep/find/Read: one call returns the symbols' verbatim source plus call paths. Use grep only for literal text, config or non-code files, or the exact file you are about to edit."
+  },
+  "gate": {
+    "deny_pending": "Project {root} is not indexed with CodeGraph and the user has not decided whether to index it. BEFORE working on it, ask the user with AskUserQuestion. The question must contain the word 'CodeGraph' and the path '{root}', with exactly these two options: '{yes}' and '{no}'. If you are a subagent without AskUserQuestion, stop and report to the principal that this decision is missing. Running or querying a `codegraph ...` command is never blocked.",
+    "deny_index_pending": "The user approved indexing {root} with CodeGraph but the index does not exist yet. Run `codegraph init {root}` now (in background if the project is large) before working on that project."
+  }
+}

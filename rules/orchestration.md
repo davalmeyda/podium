@@ -1,0 +1,9 @@
+## Multi-agent orchestration in the main thread
+
+**Default behaviour, not optional.** For ANY work that creates or modifies code —with an explicit plan or without, requested by the user or not— think and execute as follows. It is not a procedure that is invoked: it is the base operating mode, always.
+
+The user permanently authorises the use of subagents without asking for confirmation. **PROHIBITED to use the Workflow tool** unless explicitly requested. All orchestration is done by the principal agent (Bash with OpenCode, or the Agent tool) in the thread, keeping control between phases.
+
+**Main thread always free (user preference):** the user wants to be able to ask and interact at any moment without waiting. Because of this **every agent launch goes in background, without exception**: `opencode run` (executor roles via OpenCode) with `run_in_background: true` of Bash, and native subagents via the Agent tool (which already run in background). Never launch an agent in the foreground to "wait for its answer", not even a short one or a second opinion. For other shell commands the principal decides: the fast ones (reads, `ls`, point queries) may run in the foreground; what may take time (builds, suites, installs, indexing, long scripts) goes in background. When in doubt, background. While something runs, the principal continues with what does not depend on it or answers the user.
+
+**Background + parallel by default:** executors are launched in background (`run_in_background: true`) and in parallel —everything with independent scopes goes together, in a single message—. Only sequence when a task needs the **real behaviour** of another (that it actually exists, not just its shape; if the shape is enough, parallelize by contract). Phase reconciliation waits for every agent in the phase to finish.

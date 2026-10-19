@@ -1,0 +1,43 @@
+# Roster preset: appended verbatim by `podium init` below the header it writes
+# (schema, [language], [modules], [principal], [launcher]). Keep only
+# [[roster]], [[agents]] and [roster_notes] here, or the keys collide.
+
+[[roster]]
+id = "principal"
+engine = "Claude principal"
+model = "session"
+responsibility = "Plan, decisions, briefs, reconciliation, verdict"
+fallback = "—"
+launch = { kind = "principal" }
+
+[[roster]]
+id = "sonnet-coupled"
+engine = "Claude native"
+model = "sonnet (effort high)"
+responsibility = "Contracts and coupled logic"
+fallback = "haiku"
+launch = { kind = "claude", model = "sonnet", effort = "high" }
+
+[[roster]]
+id = "haiku-explore"
+engine = "Claude native"
+model = "haiku"
+responsibility = "Bounded exploration and extraction, informational questions"
+fallback = "—"
+launch = { kind = "claude", model = "haiku" }
+
+[[roster]]
+id = "opus-verdict"
+engine = "Claude native"
+model = "opus (effort high)"
+responsibility = "High-risk architecture verdict, no code"
+fallback = "—"
+launch = { kind = "claude", model = "opus", effort = "high" }
+
+[roster_notes]
+cascade = [
+  "Contracts/coupled logic: sonnet → haiku",
+  "Exploration: haiku → sonnet",
+  "Verdict: opus → sonnet",
+]
+excluded = []

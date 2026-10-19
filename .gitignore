@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.codegraph/
+.DS_Store
+node_modules/
+*.bak-podium-*
+/.secrets/
+/test/.out/

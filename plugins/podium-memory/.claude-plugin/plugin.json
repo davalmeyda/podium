@@ -1,0 +1,15 @@
+{
+  "name": "podium-memory",
+  "version": "0.1.0",
+  "description": "podium memory plugin: stop hook that nudges the agent to save Graphiti entries when substantial work happened since the last save, plus the project-memory skill that teaches agents how to read and write to the shared work log.",
+  "author": {
+    "name": "podium"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "graphiti",
+    "podium"
+  ],
+  "hooks": "./hooks/hooks.json"
+}
