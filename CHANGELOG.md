@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-19
+
 ### Added
 - Opt-in `worktrees` module, asked by `podium init` and by the agent-guided install: rules that let the principal move a large or structural change to a git worktree and merge it back itself, and `podium worktree create|integrate|clean` (no commits, main checkout's branch and index untouched, dependency folders symlinked, nothing left after `clean`). With it on, the CodeGraph gate never asks about a worktree and blocks it until indexed, unless the user declined indexing for its main checkout.
 
@@ -70,6 +72,7 @@ Initial public release of podium.
   - `scripts/check-versions.py` — asserts all versions agree, and that an external `--tag` matches the code version.
 - **Documentation**: `docs/ARCHITECTURE.md` is the binding contract for the whole project; `INSTALL.md` is written for the agent that does the install.
 
-[Unreleased]: https://github.com/davalmeyda/podium/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/davalmeyda/podium/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/davalmeyda/podium/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/davalmeyda/podium/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davalmeyda/podium/releases/tag/v0.1.0

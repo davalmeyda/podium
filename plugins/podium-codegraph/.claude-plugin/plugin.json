@@ -1,6 +1,6 @@
 {
   "name": "podium-codegraph",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CodeGraph hooks: gate reading in unindexed code projects and nudge toward `codegraph_explore` instead of grep.",
   "license": "MIT",
   "keywords": [
