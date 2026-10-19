@@ -70,7 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("uninstall", help="remove what podium wrote")
     p.add_argument("--dry-run", action="store_true")
 
-    sub.add_parser("update", help="pull the checkout and re-run install")
+    p = sub.add_parser("update", help="move the checkout to the latest release and re-run install")
+    p.add_argument("--dry-run", action="store_true", help="show the target release, change nothing")
     return parser
 
 
@@ -294,6 +295,10 @@ def cmd_update(args: argparse.Namespace, paths: paths_mod.Paths, env: Mapping[st
     if git is None:
         raise targets.EnvError("git is not installed")
     ref = env.get("PODIUM_REF") or _latest_release(git, home, env) or "main"
+    if getattr(args, "dry_run", False):
+        print("podium %s at %s would move to %s, then run `podium install`." % (__version__, home, ref))
+        print("Nothing changed. After updating, preview with `podium install --dry-run`.")
+        return EXIT_OK
     for step in (("fetch", "--depth", "1", "--tags", "origin", ref),
                  ("checkout", "--quiet", "--detach", "FETCH_HEAD")):
         code, out = _git(git, home, *step, env=env)

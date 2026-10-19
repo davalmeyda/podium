@@ -39,6 +39,31 @@ Requirements: Python ≥ 3.8 and git. Claude Code is required; OpenCode is
 optional (without it, use the `claude-only` roster preset). The installer
 pins the latest release tag.
 
+## Try it before you apply it
+
+podium is plain Python (standard library only) and shell, with no compiled
+binaries, so you can read every line it runs. Every command that writes has a
+preview:
+
+```sh
+podium detect                      # read-only: what is installed, what podium would touch
+podium render --target claude-md   # the exact text podium would write
+podium diff                        # rendered output vs what is on disk now
+podium install --dry-run           # the ordered plan: files, blocks, JSON keys, plugin commands
+podium migrate --dry-run           # legacy hooks that would be replaced
+podium uninstall --dry-run         # what removal would restore
+podium update --dry-run            # which release update would move to
+```
+
+`--dry-run` writes nothing and runs nothing. To try a full install without
+touching your real setup, point podium at a throwaway home:
+
+```sh
+export HOME=$(mktemp -d) && podium init && podium install --modules rules,executors
+```
+
+Look at the generated files under that directory, then delete it.
+
 ## What you get
 
 | Module | What it installs |

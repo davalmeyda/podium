@@ -218,6 +218,23 @@ class CliTest(coretest.CoreCase):
         self.assertEqual(code, 0)
         self.assertIn("git -C %s fetch --depth 1 --tags origin main" % checkout, self.claude_calls())
 
+    def test_update_dry_run_only_lists_tags(self):
+        script = '#!/bin/sh\necho "git $@" >> "$FAKE_CLAUDE_LOG"\n'
+        import contextlib, io, shutil
+        from podium import cli
+        checkout = self.tmp / "checkout"
+        shutil.copytree(str(coretest.FIXTURE_HOME), str(checkout))
+        (checkout / ".git").mkdir()
+        (self.bin / "git").write_text(script)
+        (self.bin / "git").chmod(0o755)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main(["update", "--dry-run"], env=self.env, podium_home=checkout)
+        self.assertEqual(code, 0)
+        self.assertEqual([c.split()[3] for c in self.claude_calls()], ["ls-remote"])
+        self.assertIn("would move to main", out.getvalue())
+        self.assertFalse((self.claude_dir / "CLAUDE.md").exists())
+
     def test_update_stops_when_fetch_fails(self):
         script = '#!/bin/sh\necho "git $@" >> "$FAKE_CLAUDE_LOG"\n[ "$3" = fetch ] && exit 1\nexit 0\n'
         code, _, _ = self._update(script)

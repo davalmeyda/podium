@@ -318,7 +318,7 @@ podium diff      [--target ID]
 podium migrate   [--dry-run]
 podium doctor
 podium uninstall [--dry-run]
-podium update
+podium update    [--dry-run]
 ```
 
 `install` = validate config → render all targets → write runtime.json →
