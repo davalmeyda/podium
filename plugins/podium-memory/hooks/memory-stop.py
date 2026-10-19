@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from _runtime import (
+    builtin_locale,
     cleanup_scratch,
     load_locale,
     load_runtime,
@@ -32,9 +33,11 @@ HOOK_NAME = "memory-stop"
 def main():
     paths = resolve_paths()
     runtime = load_runtime(paths)
+    paths = runtime["paths"]  # merged values: scratch and ignore handling use them
     locale = load_locale(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         runtime.get("ui", "en"),
+        paths,
     )
 
     # also run in tmp paths, /tmp/, /private/tmp/ (macOS), and the claude projects cache
@@ -102,12 +105,7 @@ def main():
         state_file, {"at": len(uses), "ts": now}
     )
 
-    template = (
-        locale.get("stop", {}).get("reason")
-        or locale.get("reason")
-        or ""
-    )
-    reason = template.format(edits=edits, executors=executors)
+    reason = format_reason(locale, edits, executors)
 
     # emit block decision on stdout (Claude Code hook protocol)
     try:
@@ -115,6 +113,21 @@ def main():
         sys.stdout.write("\n")
     except Exception as exc:
         log_hook_error(paths, HOOK_NAME, f"emit: {exc}")
+
+
+def format_reason(locale, edits, executors):
+    """Block reason from the locale template. A template that is missing or
+    does not format falls back to the built-in English copy, so the decision
+    never carries an empty reason."""
+    template = (locale.get("stop") or {}).get("reason") or ""
+    for candidate in (template, builtin_locale()["stop"]["reason"]):
+        try:
+            text = candidate.format(edits=edits, executors=executors)
+        except (KeyError, IndexError, ValueError):
+            continue
+        if text.strip():
+            return text
+    return "Substantial work happened since the last memory save. Load the `podium-memory:project-memory` skill and save one dense entry, or reply \"Nothing to record in memory.\""
 
 
 def parse_uses(transcript):

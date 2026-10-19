@@ -20,5 +20,6 @@
   "no_variant": "sin variante",
   "compaction_suffix": "compactación ×",
   "short_today": "hoy ",
+  "reader_error": "lector: ",
   "weekdays": ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"]
 }

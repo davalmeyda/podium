@@ -112,6 +112,21 @@ class InitRealPresetTests(InitBase):
         self.assertEqual(data["schema"], 1)
         self.assertNotIn("agents", data)
 
+    def test_custom_preset(self) -> None:
+        # Defect 3: `roster_preset = "custom"` must work end to end with the
+        # shipped ``podium/presets/custom.toml`` (no schema/language/modules/
+        # principal/launcher, only the principal roster row, commented examples
+        # and a roster_notes block). The resulting ``podium.toml`` must load
+        # via ``config.load`` and render exactly one roster row.
+        data = self._run_with("custom")
+        self.assertEqual(data["schema"], 1)
+        self.assertEqual(data["language"]["response"], "en")
+        # No `[[agents]]` in the preset means config.load returns no agents key.
+        self.assertNotIn("agents", data)
+        self.assertEqual(len(data["roster"]), 1)
+        self.assertEqual(data["roster"][0]["id"], "principal")
+        self.assertEqual(data["roster"][0]["launch"]["kind"], "principal")
+
 
 class InitCleanTests(InitBase):
     """init on a completely empty config_dir must write a usable podium.toml."""

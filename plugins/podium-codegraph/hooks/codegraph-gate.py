@@ -111,22 +111,17 @@ def save_decisions(paths, state):
     os.replace(tmp, path)
 
 
-def indexed(path, roots):
-    """True if `path` is under HOME or one of `roots` and has a .codegraph
-    ancestor that is not the root itself."""
+def indexed(path, roots, home):
+    """True if `path` has a .codegraph ancestor (or itself) inside HOME, which
+    is exclusive, or inside a configured root, which is inclusive."""
     abspath = os.path.abspath(path)
-    for top in (os.path.expanduser("~"),) + tuple(roots or ()):
-        if not top:
-            continue
-        top_abs = os.path.abspath(os.path.expanduser(top))
-        if abspath == top_abs:
-            continue
-        if not (abspath == top_abs or abspath.startswith(top_abs + os.sep)):
-            continue
+    for top, inclusive in _runtime.search_tops(abspath, home, roots):
         d = abspath
-        while d.startswith(top_abs + os.sep) and d != top_abs:
+        while _runtime.within_top(d, top, inclusive):
             if os.path.isdir(os.path.join(d, ".codegraph")):
                 return True
+            if d == top:
+                break
             parent = os.path.dirname(d)
             if parent == d:
                 break
@@ -134,16 +129,17 @@ def indexed(path, roots):
     return False
 
 
-def project_root(path, manifests, ignored):
-    """Closest project (manifest or .git) containing the path; never the home."""
+def project_root(path, manifests, ignored, home, roots):
+    """Closest project (manifest or .git) containing the path, searched within
+    HOME (exclusive) and the configured roots (inclusive); never the home."""
     abspath = os.path.abspath(path)
     if any(abspath == i or abspath.startswith(i + os.sep) for i in ignored):
         return None
     if "/node_modules/" in abspath:
         return None
     d = abspath if os.path.isdir(abspath) else os.path.dirname(abspath)
-    home = os.path.expanduser("~")
-    while d.startswith(home + os.sep):
+    tops = _runtime.search_tops(abspath, home, roots)
+    while any(_runtime.within_top(d, top, inclusive) for top, inclusive in tops):
         if any(os.path.exists(os.path.join(d, m)) for m in manifests):
             return d
         parent = os.path.dirname(d)
@@ -153,6 +149,94 @@ def project_root(path, manifests, ignored):
     return None
 
 
+def _split_bash_segments(cmd):
+    """Split a shell command into the list of non-empty segments a human
+    would recognise, so we can reason about which side of a `;`/`&&`/`||`/`|`
+    is the actual call."""
+    if not cmd:
+        return []
+    text = cmd
+    out = []
+    start = 0
+    i = 0
+    quote = None
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in ("'", '"'):
+            quote = c
+            i += 1
+            continue
+        if c in (";", "|"):
+            out.append(text[start:i])
+            start = i + 1
+            i += 1
+            continue
+        if c == "&" and i + 1 < len(text) and text[i + 1] == "&":
+            out.append(text[start:i])
+            start = i + 2
+            i += 2
+            continue
+        if c == "\n":
+            out.append(text[start:i])
+            start = i + 1
+            i += 1
+            continue
+        i += 1
+    tail = text[start:]
+    if tail.strip():
+        out.append(tail)
+    return [s.strip() for s in out if s and s.strip()]
+
+
+def _classify_segment(segment):
+    """Return one of: 'codegraph' (runs codegraph), 'cd' (just `cd <dir>`,
+    which does not run anything), or 'other' (runs something else).
+
+    A `cd <dir>` segment is treated as a neutral no-op for the purpose of
+    deciding whether a whole command is a pure CodeGraph invocation."""
+    if not segment:
+        return None
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        words = segment.split()
+    if not words:
+        return None
+    if words[0] == "cd":
+        # A pure `cd <dir>` segment never invokes anything on its own; any
+        # follow-up command lives in the NEXT segment after the `&&`.
+        return "cd"
+    first = words[0]
+    if first == "codegraph" or first.endswith("/codegraph"):
+        return "codegraph"
+    return "other"
+
+
+def _is_pure_codegraph_command(cmd):
+    """A command is exempt from gating only when EVERY non-empty shell
+    segment is either a `cd <dir>` no-op or a codegraph invocation.
+    `cat secret # codegraph` and `codegraph status; cat /x/f` are NOT
+    exempt; `codegraph init /x`, `codegraph status && codegraph explore "q"`,
+    and `cd /x && codegraph init .` are."""
+    segments = _split_bash_segments(cmd)
+    if not segments:
+        return False
+    for s in segments:
+        kind = _classify_segment(s)
+        if kind is None or kind == "codegraph" or kind == "cd":
+            continue
+        return False
+    return True
+
+
 def targets(tool, inp, cwd):
     """Return up to 8 paths to check for the current tool invocation."""
     if tool in ("Read", "Edit", "Write"):
@@ -160,7 +244,7 @@ def targets(tool, inp, cwd):
     if tool in ("Grep", "Glob"):
         return [inp.get("path") or cwd]
     cmd = inp.get("command", "")
-    if "codegraph" in cmd:
+    if _is_pure_codegraph_command(cmd):
         return []  # indexing or querying CodeGraph is never blocked
     found = [cwd]
     try:
@@ -188,8 +272,8 @@ def gate(data, paths, runtime, locale, yes, no):
             continue
         if not os.path.isabs(t):
             t = os.path.join(cwd, t)
-        root = project_root(t, manifests, ignored)
-        if not root or indexed(t, roots):
+        root = project_root(t, manifests, ignored, paths["home"], roots)
+        if not root or indexed(t, roots, paths["home"]):
             continue
         decision = state["decisions"].get(root)
         if decision == "skip":
@@ -206,45 +290,54 @@ def gate(data, paths, runtime, locale, yes, no):
         return
 
 
+def _decide(text, yes_set, no_set):
+    """'index' or 'skip' when exactly one side's label appears in the text, else None."""
+    matched_yes = any(label in text for label in yes_set)
+    matched_no = any(label in text for label in no_set)
+    if matched_yes and not matched_no:
+        return "index"
+    if matched_no and not matched_yes:
+        return "skip"
+    return None
+
+
 def record(data, paths, runtime, yes, no):
-    """PostToolUse AskUserQuestion handler. Match labels of active locale AND
-    every shipped locale so a label from either language is recognised."""
+    """PostToolUse AskUserQuestion handler. Labels of EVERY shipped locale are
+    recognised, both in structured answers and in the unstructured fallback."""
     inp = data.get("tool_input") or {}
     resp = data.get("tool_response") or {}
     answers = resp.get("answers") if isinstance(resp, dict) else None
     if not isinstance(answers, dict):
         answers = inp.get("answers") if isinstance(inp.get("answers"), dict) else {}
+
+    # Union of yes/no labels across all shipped locales so a label from any
+    # language is recognised.
+    yes_set, no_set = _all_labels(_PLUGIN_ROOT)
+
     if not answers:
         blob = json.dumps(resp, ensure_ascii=False) if not isinstance(resp, str) else resp
         questions = [q.get("question", "") for q in inp.get("questions") or [] if isinstance(q, dict)]
-        answers = {q: blob for q in questions if "CodeGraph" in q and (yes in blob) != (no in blob)}
-
-    # Build the union of yes/no labels across all shipped locales so a label
-    # from any language is recognised.
-    yes_set, no_set = _all_labels(_PLUGIN_ROOT)
+        answers = {q: blob for q in questions
+                   if "CodeGraph" in q and _decide(blob, yes_set, no_set) is not None}
 
     state = load_decisions(paths)
     changed = False
     for question, answer in answers.items():
         if "CodeGraph" not in question:
             continue
-        roots = [p.rstrip(".,;:'\"`)") for p in re.findall(r"(/[^\s'\"`]+)", question)]
+        candidates = [p.rstrip(".,;:'\"`)") for p in re.findall(r"(/[^\s'\"`]+)", question)]
         manifests = _manifests(runtime.get("codegraph", {}).get("manifests") or ())
         ignored = _ignored_set(paths["home"], runtime.get("codegraph", {}).get("ignored") or ())
-        root = next((r for r in roots if project_root(r, manifests, ignored) == r), None)
+        roots = runtime.get("codegraph", {}).get("roots") or ()
+        root = next((c for c in candidates
+                     if project_root(c, manifests, ignored, paths["home"], roots) == c), None)
         if not root:
             continue
-        text = str(answer)
-        matched_yes = next((label for label in yes_set if label in text), None)
-        matched_no = next((label for label in no_set if label in text), None)
-        if matched_yes is not None and matched_no is None:
-            state["decisions"][root] = "index"
-            changed = True
-        elif matched_no is not None and matched_yes is None:
-            state["decisions"][root] = "skip"
-            changed = True
-        else:
+        decision = _decide(str(answer), yes_set, no_set)
+        if decision is None:
             continue
+        state["decisions"][root] = decision
+        changed = True
     if changed:
         try:
             save_decisions(paths, state)

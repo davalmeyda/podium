@@ -116,9 +116,15 @@ def _opencode_config_files(opencode_config_dir: Path) -> list[str]:
 def _opencode_providers() -> list[str]:
     """Run ``opencode auth list`` and best-effort parse provider ids.
 
-    The output is plain text and varies by OpenCode version. We treat any line
-    that starts with an alphanumeric id (letters, digits, dot, dash) and is not
-    blank or starting with ``#`` as a provider id.
+    The output is plain text and varies by OpenCode version. A real ``v2``
+    output is one provider per line, formatted as
+    ``MiniMax (minimax.io)  API key  stored`` (display name, optional
+    parenthetical id, auth method, status). The provider id we expose is the
+    first whitespace-separated token of the line, lower-cased.
+
+    Header/footer banners (``== ... ==``), blank lines, ``#`` comments, and
+    lines whose first character is not a letter are skipped. Anything that
+    does not look like an identifier token is also dropped.
     """
     path = _which("opencode")
     if path is None:
@@ -132,36 +138,80 @@ def _opencode_providers() -> list[str]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
+        # Drop lines whose first character is not a letter. This filters out
+        # ``== Section ==`` banners and similar decorative lines that some
+        # OpenCode builds emit around the provider list.
+        if not line[0].isalpha():
+            continue
         head = line.split()[0]
         if provider_re.match(head):
-            ids.append(head)
+            ids.append(head.lower())
     # Stable order, deduped.
     return list(dict.fromkeys(ids))
 
 
-def _opencode_agents(opencode_config_dir: Path) -> list[dict[str, Any]]:
+def _owned_agent_paths(state_dir: Path) -> set[str]:
+    """Return the absolute paths recorded as podium-owned agent files.
+
+    Reads ``state_dir/owned.json`` (the ledger written by ``podium install``)
+    and returns the keys of its ``files`` map whose values are absolute paths
+    under ``opencode_config_dir/agents/``. A missing or unreadable ledger
+    yields an empty set so ``detect`` never raises.
+    """
+    ledger_path = state_dir / "owned.json"
+    if not ledger_path.is_file():
+        return set()
+    try:
+        with ledger_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return set()
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict):
+        return set()
+    return {str(k) for k in files.keys() if isinstance(k, str)}
+
+
+def _opencode_agents(
+    opencode_config_dir: Path,
+    state_dir: Path,
+) -> list[dict[str, Any]]:
     """Enumerate ``opencode_config_dir/agents/*.md`` owned-by-podium heuristic.
 
-    A podium-owned agent carries either the ``podium:agent`` marker in its
-    frontmatter or matches the ``podX-<role>-...`` naming convention used by
-    the roster render pass. We do not parse YAML in stdlib; the heuristic is
-    intentionally simple and the marker is the source of truth.
+    A podium-owned agent is any of:
+    * carries the ``podium:agent`` marker in its frontmatter,
+    * matches the ``podX-<role>-...`` naming convention used by the roster
+      render pass, or
+    * is listed as a managed file in the podium ledger
+      ``state_dir/owned.json`` under ``files`` — this is the source of truth
+      for files written by a previous ``podium install`` (defect 5: roster
+      agents are named ``minimax``/``sol``/``luna`` and have no marker).
+
+    We do not parse YAML in stdlib; the heuristic is intentionally simple and
+    the ledger is the authority when the agent names diverge from the
+    convention.
     """
     agents_dir = opencode_config_dir / "agents"
     if not agents_dir.is_dir():
         return []
+    owned_paths = _owned_agent_paths(state_dir)
     result: list[dict[str, Any]] = []
     for entry in sorted(agents_dir.iterdir()):
         if not entry.is_file() or entry.suffix != ".md":
             continue
+        path_str = str(entry)
         owned = False
         try:
             text = entry.read_text(encoding="utf-8")
         except OSError:
             text = ""
-        if "podium:agent" in text or re.search(r"^pod\d?-", entry.name):
+        if (
+            "podium:agent" in text
+            or re.search(r"^pod\d?-", entry.name)
+            or path_str in owned_paths
+        ):
             owned = True
-        result.append({"name": entry.stem, "path": str(entry), "podium_owned": owned})
+        result.append({"name": entry.stem, "path": path_str, "podium_owned": owned})
     return result
 
 
@@ -298,7 +348,7 @@ def run(paths: Mapping[str, Any]) -> dict[str, Any]:
     opencode_block: dict[str, Any] = {
         "config_files": _opencode_config_files(opencode_config_dir),
         "providers": _opencode_providers(),
-        "agents": _opencode_agents(opencode_config_dir),
+        "agents": _opencode_agents(opencode_config_dir, state_dir),
         "mcp": _opencode_mcp(opencode_config_dir),
     }
 

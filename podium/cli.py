@@ -259,7 +259,17 @@ def cmd_migrate(args: argparse.Namespace, paths: paths_mod.Paths, env: Mapping[s
 
 def cmd_doctor(args: argparse.Namespace, paths: paths_mod.Paths, env: Mapping[str, str]) -> int:
     config = config_mod.load(paths.config_dir, env)
-    return int(_import("doctor").run(_paths_mapping(paths), config))
+    # ``doctor.run`` reads ``_legacy_hooks`` and ``_plugins_installed`` from the
+    # config mapping it receives; nothing outside tests populates them, so the
+    # legacy-vs-podium overlap check (§8) is always skipped. Pull them from a
+    # fresh ``podium.detect`` run and inject them into a *copy* so we never
+    # mutate the loaded config in place.
+    paths_dict = _paths_mapping(paths)
+    claude_block = _import("detect").run(paths_dict).get("claude") or {}
+    doctor_config = dict(config)
+    doctor_config["_legacy_hooks"] = list(claude_block.get("legacy_hooks") or [])
+    doctor_config["_plugins_installed"] = list(claude_block.get("plugins_installed") or [])
+    return int(_import("doctor").run(paths_dict, doctor_config))
 
 
 def _git(git: str, home: Path, *args: str, env: Mapping[str, str]) -> Tuple[int, str]:

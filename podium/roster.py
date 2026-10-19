@@ -92,7 +92,10 @@ def generated(config: Mapping[str, object]) -> dict:
     roster_table = "\n".join(table_lines)
 
     # roster_excluded / fallback_cascade -----------------------------------
-    roster_excluded = _bullet_block(list(notes.get("excluded") or []))
+    excluded = _bullet_block(list(notes.get("excluded") or []))
+    roster_excluded = (
+        "Models deliberately excluded from the roster (and why):\n\n" + excluded if excluded else ""
+    )
     fallback_cascade = _bullet_block(list(notes.get("cascade") or []))
 
     # launch_examples -------------------------------------------------------

@@ -1,6 +1,6 @@
 ### Consumption and time: criterion to distribute (applies to EVERY executor, of any engine)
 
-It holds for what is deployed through OpenCode (writer executor, overflow executor, consultant) and for native subagents (`sonnet`, `haiku`, `opus`). These are not caps: they are the cost model and the errors already seen, so the principal decides with its own criterion the optimal split in each case.
+It holds for what is deployed through external CLIs such as OpenCode (writer executor, overflow executor, consultant) and for native subagents (`sonnet`, `haiku`, `opus`). These are not caps: they are the cost model and the errors already seen, so the principal decides with its own criterion the optimal split in each case.
 
 **Goal of any split: the smallest total time with the smallest consumption**, without sacrificing one entirely for the other. The cost model:
 - An executor's consumption ≈ **steps × accumulated context**: each step re-sends all its context (it is billed as cache, and the writer executor's plan counts it inside the quota).
@@ -10,7 +10,7 @@ It holds for what is deployed through OpenCode (writer executor, overflow execut
 
 **The number of agents is decided by the principal** with this cost model, and is justified in one line before launching. If the user gives a scale ("launch 50"), it is a criterion to evaluate, not a blind order: it is applied if it pays off; if it does not, it is said and the useful scale is proposed with the reason.
 
-**Distribution unit = one independent zone** (function, component, section). The unit is a zone, not the file: independent zones go in parallel even if they share a file, with the brief limiting the edit to its zone and forbidding rewriting or reformatting the whole file (the joint `tsc` is run by the principal). The sequential requires a real and written dependency. See principal-decides for the precise rule.
+**Distribution unit = one independent zone** (function, component, section). The unit is a zone, not the file: independent zones go in parallel even if they share a file, with the brief limiting the edit to its zone and forbidding rewriting or reformatting the whole file (the joint typecheck is run by the principal). The sequential requires a real and written dependency. See "The principal decides, the agents execute" for the precise rule.
 
 **Measured anti-patterns (measured in a real setup (Oct 2026, 11 executor sessions): ~146M of cache vs. 0.42M of output, 141 steps on average, context of 8K to 160K):**
 1. One executor with many fixes in different zones (a backend-repo and frontend-repo run: 255 steps, ~25M of cache).
@@ -29,4 +29,4 @@ It holds for what is deployed through OpenCode (writer executor, overflow execut
 
 **Stuck signal:** an executor that drifts far from the expected deliverable turns in the partial and reports; the principal decides whether to split the work or close the brief better. It is not left to retry.
 
-**Native subagents (Agent tool):** they do not load the OpenCode executor profile, so their brief includes those rules in 3–4 lines: CodeGraph before grep/read (with `projectPath`), filtered outputs and reading by range, exact scope (what is outside is reported), no browser except for review/verification, and stop-and-report if stuck.
+**Native subagents (Agent tool):** they do not load the executor profile, so their brief includes those rules in 3–4 lines: CodeGraph before grep/read (with `projectPath`), filtered outputs and reading by range, exact scope (what is outside is reported), no browser except for review/verification, and stop-and-report if stuck.

@@ -14,8 +14,9 @@ Violating any of these destroys other agents' work or the principal's.
   migrations. Regenerating them while others are working leaves the rest of the team
   compiling against a contract different from the one the principal believes is in place.
 
-- **NEVER install or uninstall dependencies**, and never edit `package.json`, lockfiles,
-  `pnpm-workspace.yaml`, or package manager configuration. If you believe a dependency is
+- **NEVER install or uninstall dependencies**, and never edit dependency manifests (`package.json`, `pyproject.toml`,
+  `go.mod`, …), lockfiles, workspace files (`pnpm-workspace.yaml`, …) or package manager
+  configuration. If you believe a dependency is
   needed, **stop and report it**; do not install it.
 
 - **NEVER start servers or run builds.** Nothing like `dev`, `start`, `start:dev`, `build`,

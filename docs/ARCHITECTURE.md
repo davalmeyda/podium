@@ -179,8 +179,10 @@ title = "podium rules"
 fragments = [ { id = "habits", module = "rules" }, ... ]
 ```
 `source` (optional) is the fragment directory relative to `podium_home`
-(default `rules`). Fragments of a disabled module are skipped. Fragments are joined with exactly
-one blank line between them.
+(default `rules`). Fragments of a disabled module are skipped. A fragment may also carry
+`requires = "opencode-executors"`: it is rendered only when some roster row launches through
+OpenCode (`launch.kind = "opencode"`), so a Claude-only roster never receives OpenCode instructions.
+Fragments are joined with exactly one blank line between them.
 
 ### 5.3 Overlays `config_dir/overlays/<target-id>/`
 - `<fragment-id>.md` replaces that fragment (same templating).
@@ -225,6 +227,7 @@ Role permission skeletons (in this key order):
 | agents | `opencode_config_dir/agents/<name>.md` | owned file |
 | OpenCode skills | `opencode_config_dir/skills/<skill>/` | owned dir (copied from the plugin) |
 | OpenCode MCP | `opencode_config_dir/opencode.json` | owned JSON keys |
+| Claude Code MCP (memory) | `$CLAUDE_CONFIG_DIR/.claude.json` (else `~/.claude.json`), pointer `/mcpServers/<mcp_server>` | owned JSON key, written only through `claude mcp` |
 
 - **Managed block**: lines `<!-- podium:begin <target-id> -->` …
   `<!-- podium:end <target-id> -->`. Outside text is never touched. Missing
@@ -237,10 +240,37 @@ Role permission skeletons (in this key order):
   by the user: refuse unless `--force` (backup first). Owned agent and skill
   files the current config no longer renders are removed on install (left in
   place, and forgotten, if the user edited them).
+- **Pruning disabled modules**: a module is *disabled* when `modules.<m> = false`
+  (a module that is enabled but left out of `--modules` is untouched; a partial
+  run only acts on the modules it names). After the install steps of the enabled
+  modules and before the plugin steps, `install` removes what the ledger says
+  podium owns for each disabled module, with the same keep/restore rules as
+  `uninstall` (edited files are kept and forgotten, adopted files are restored
+  from their backup): `rules` → both managed blocks; `executors` → owned agent
+  files and the executor profile; `memory` → owned OpenCode skill files, the
+  `/mcp/<mcp_server>` pointer and the Claude Code memory MCP entry (`claude mcp
+  remove`); `codegraph` → the `/mcp/codegraph` pointer. With `memory` enabled but
+  `memory.url` empty, only the two memory MCP entries are removed. For every
+  disabled module that has a Claude plugin, `claude plugin uninstall
+  <plugin>@podium --scope user` runs (non-fatal; "not installed"/"not found" is
+  tolerated); without `claude` there is one `[skip]` note. The marketplace is
+  added only while some plugin module is enabled and is never removed by
+  `install`. Dry-run lists all of these as usual.
 - **JSON merge**: set only owned pointers (`/mcp/<server>`,
   `/permission/<glob>`). Uninstall restores `before` only if the current value
   still equals `applied`. If both `opencode.json` and `opencode.jsonc` exist,
   podium writes `opencode.json` and `doctor` warns.
+- **Claude Code MCP**: when `memory` is on, `memory.url` is non-empty and
+  `claude` is on PATH, install registers `{"type":"http","url":<memory.url>}`
+  (plus `headers` when set) at user scope with `claude mcp add-json <mcp_server>
+  '<json>' --scope user`. podium never edits `.claude.json` (Claude rewrites it
+  concurrently); it only reads it to compare, with the same ledger semantics as
+  above (absent → add; foreign and different → conflict unless `--adopt`, which
+  runs `claude mcp remove` then `add-json` and records `before`; owned but
+  edited → conflict unless `--force`; owned and config changed → remove +
+  `add-json`). Uninstall removes it (and re-adds `before`) only if the current
+  value still equals `applied`. Dry-run lists the `[run]` steps; without
+  `claude` there is one `[skip]` note and no ledger change.
 - **Safety**: every write is atomic (temp file + `os.replace`); a lock
   `state_dir/lock` (exclusive create, stale after 10 min) serialises runs;
   backups are `<file>.bak-podium-<YYYYMMDD-HHMMSS>-<4 hex>`; an install is a
@@ -323,7 +353,8 @@ podium update    [--dry-run]
 
 `install` = validate config → render all targets → write runtime.json →
 apply plan (§7) → `claude plugin marketplace add <podium_home>` +
-`claude plugin install <plugin>@podium --scope user` per enabled module.
+`claude plugin install <plugin>@podium --scope user` per enabled module →
+`claude mcp add-json <mcp_server> … --scope user` for the memory server (§7).
 `update` = move the checkout to `PODIUM_REF` (default: the highest
 `vX.Y.Z` tag on origin, else `main`) with fetch + detached checkout, exactly
 like `install.sh`, then run the new checkout's `podium install`.

@@ -10,12 +10,13 @@ import copy
 import importlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from podium import render as render_mod
 from podium import state
@@ -440,36 +441,51 @@ def plan_json(ctx: Ctx, path: Path, entries: Sequence[Tuple[str, Any]], label: s
     return Step("json", path, action, label, apply=apply)
 
 
-def plan_json_remove(ctx: Ctx, path: Path) -> List[Step]:
-    """Revert every owned pointer of `path` whose current value still equals `applied`."""
+def plan_json_remove(ctx: Ctx, path: Path, only: Optional[Collection[str]] = None) -> List[Step]:
+    """Revert the owned pointers of `path` (all, or just those in `only`) whose current value still equals `applied`."""
     recorded = ctx.ledger.json.get(str(path))
     if not recorded:
         return []
+    items = [(pointer, rec) for pointer, rec in recorded.items() if only is None or pointer in only]
+    if not items:
+        return []
     label = "owned JSON keys"
+
+    def revert(doc: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        new_doc = copy.deepcopy(doc)
+        kept: List[str] = []
+        for pointer, rec in items:
+            tokens = _tokens(pointer)
+            current = _json_get(new_doc, tokens)
+            if current is _MISSING:
+                continue
+            if current != rec.get("applied"):
+                kept.append(pointer)
+                continue
+            if rec.get("before") is None:
+                _json_delete(new_doc, tokens)
+            else:
+                _json_set(new_doc, tokens, rec["before"])
+        return new_doc, kept
+
     try:
         doc, existed = _read_json_doc(path)
     except Conflict as exc:
         return [Step("json", path, "conflict", label, str(exc))]
-    new_doc = copy.deepcopy(doc)
-    kept: List[str] = []
-    for pointer, rec in recorded.items():
-        tokens = _tokens(pointer)
-        current = _json_get(new_doc, tokens)
-        if current is _MISSING:
-            continue
-        if current != rec.get("applied"):
-            kept.append(pointer)
-            continue
-        if rec.get("before") is None:
-            _json_delete(new_doc, tokens)
-        else:
-            _json_set(new_doc, tokens, rec["before"])
+    new_doc, kept = revert(doc)
 
     def apply() -> None:
-        if new_doc != doc:
+        # Re-read: an earlier step of the same plan may already have rewritten this file.
+        current_doc, _ = _read_json_doc(path)
+        reverted, _kept = revert(current_doc)
+        if reverted != current_doc:
             state.backup(path, ctx.timestamp())
-            state.atomic_write(path, _dump_json(new_doc))
-        ctx.ledger.json.pop(str(path), None)
+            state.atomic_write(path, _dump_json(reverted))
+        owned = ctx.ledger.json.get(str(path), {})
+        for pointer, _rec in items:
+            owned.pop(pointer, None)
+        if not owned:
+            ctx.ledger.json.pop(str(path), None)
         ctx.ledger.save()
 
     detail = "kept (edited since podium wrote them): %s" % ", ".join(kept) if kept else ""
@@ -483,29 +499,195 @@ def find_claude(env: Mapping[str, str]) -> Optional[str]:
     return shutil.which("claude", path=env.get("PATH", os.defpath))
 
 
+def _run_argv(argv: List[str], env: Mapping[str, str], fatal: bool, tolerate: Sequence[str] = ()) -> None:
+    try:
+        proc = subprocess.run(argv, env=dict(env), stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=EXEC_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        if fatal:
+            raise EnvError("%s failed: %s" % (" ".join(argv), exc))
+        print("  warning: %s failed: %s" % (" ".join(argv), exc))
+        return
+    if proc.returncode == 0:
+        return
+    output = proc.stdout.decode("utf-8", "replace").strip()
+    if any(word in output.lower() for word in tolerate):
+        return
+    tail = " | ".join(output.splitlines()[-3:])
+    if fatal:
+        raise EnvError("%s exited with %d: %s" % (" ".join(argv), proc.returncode, tail))
+    print("  warning: exit %d: %s" % (proc.returncode, tail))
+
+
 def _exec_step(label: str, argv: List[str], env: Mapping[str, str], fatal: bool,
                tolerate: Sequence[str] = ()) -> Step:
     def apply() -> None:
-        try:
-            proc = subprocess.run(argv, env=dict(env), stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  timeout=EXEC_TIMEOUT)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            if fatal:
-                raise EnvError("%s failed: %s" % (" ".join(argv), exc))
-            print("  warning: %s failed: %s" % (" ".join(argv), exc))
-            return
-        if proc.returncode == 0:
-            return
-        output = proc.stdout.decode("utf-8", "replace").strip()
-        if any(word in output.lower() for word in tolerate):
-            return
-        tail = " | ".join(output.splitlines()[-3:])
-        if fatal:
-            raise EnvError("%s exited with %d: %s" % (" ".join(argv), proc.returncode, tail))
-        print("  warning: exit %d: %s" % (proc.returncode, tail))
+        _run_argv(argv, env, fatal, tolerate)
 
     return Step("exec", None, "run", " ".join(argv), apply=apply)
+
+
+# --------------------------------------------------------------------------- Claude Code MCP (via the claude CLI)
+
+def claude_user_config_path(paths: Paths, env: Mapping[str, str]) -> Path:
+    """Claude Code's user-scope config: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`."""
+    if env.get("CLAUDE_CONFIG_DIR"):
+        return paths.claude_dir / ".claude.json"
+    return paths.home / ".claude.json"
+
+
+def _is_claude_user_config(path: Path) -> bool:
+    return path.name == ".claude.json"
+
+
+def _claude_mcp_pointer(name: str) -> str:
+    return "/mcpServers/%s" % name.replace("~", "~0").replace("/", "~1")
+
+
+def _claude_memory_entry(memory: Mapping[str, Any]) -> Dict[str, Any]:
+    """Claude Code HTTP MCP entry for the memory server (headers only when set)."""
+    entry: Dict[str, Any] = {"type": "http", "url": memory["url"]}
+    if memory.get("headers"):
+        entry["headers"] = dict(memory["headers"])
+    return entry
+
+
+def _read_claude_server(path: Path, name: str) -> Any:
+    """Current `mcpServers[name]` of Claude's config (read-only; `_MISSING` if absent or unreadable)."""
+    try:
+        with open(str(path), "r", encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return _MISSING
+    servers = doc.get("mcpServers") if isinstance(doc, dict) else None
+    if isinstance(servers, dict) and name in servers:
+        return servers[name]
+    return _MISSING
+
+
+def _compact(value: Any) -> str:
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _quoted(argv: Sequence[str]) -> str:
+    return " ".join(shlex.quote(part) for part in argv)
+
+
+def _claude_mcp_argvs(claude: str, name: str, entry: Optional[Any], remove: bool) -> List[List[str]]:
+    argvs: List[List[str]] = []
+    if remove:
+        argvs.append([claude, "mcp", "remove", name, "--scope", "user"])
+    if entry is not None:
+        argvs.append([claude, "mcp", "add-json", name, _compact(entry), "--scope", "user"])
+    return argvs
+
+
+def _claude_mcp_steps(ctx: Ctx, path: Path, pointer: str, action: str, argvs: List[List[str]],
+                      env: Mapping[str, str], record: Optional[Dict[str, Any]]) -> List[Step]:
+    """One `[run]` step per command; the last one also records (or, when `record` is None, drops) the ledger entry."""
+    def update_ledger() -> None:
+        if record is None:
+            _drop_claude_entry(ctx, path, pointer)()
+            return
+        ctx.ledger.json.setdefault(str(path), {})[pointer] = record
+        ctx.ledger.save()
+
+    steps: List[Step] = []
+    for index, argv in enumerate(argvs):
+        last = index == len(argvs) - 1
+        tolerate = ("not found", "no mcp server") if argv[2] == "remove" else ()
+
+        def apply(argv=argv, last=last, tolerate=tolerate) -> None:
+            _run_argv(argv, env, fatal=True, tolerate=tolerate)
+            if last:
+                update_ledger()
+
+        steps.append(Step("exec", path, "run", _quoted(argv), apply=apply))
+    if not argvs:
+        steps.append(Step("json", path, action, "Claude Code MCP server %s" % pointer.split("/")[-1],
+                          apply=update_ledger))
+    return steps
+
+
+def plan_claude_mcp(ctx: Ctx, claude: str, env: Mapping[str, str], path: Path, name: str,
+                    entry: Dict[str, Any]) -> List[Step]:
+    """Register `name` at Claude Code user scope through the claude CLI, with JSON-ledger ownership."""
+    pointer = _claude_mcp_pointer(name)
+    label = "Claude Code MCP server %s" % name
+    rec = ctx.ledger.json.get(str(path), {}).get(pointer)
+    current = _read_claude_server(path, name)
+    replace = False
+    if rec is not None:
+        before = rec.get("before")
+        if current is _MISSING:
+            action = "update"
+        elif current == rec.get("applied"):
+            if current == entry:
+                return [Step("json", path, "unchanged", label)]
+            action, replace = "update", True
+        elif current == entry:
+            action = "adopt"
+        elif ctx.force:
+            action, replace = "force", True
+        else:
+            return [Step("json", path, "conflict", label,
+                         "%s was modified since podium wrote it; use --force to overwrite" % name)]
+    else:
+        before = None if current is _MISSING else copy.deepcopy(current)
+        if current is _MISSING:
+            action = "create"
+        elif current == entry:
+            action = "adopt"
+        elif ctx.adopt:
+            action, replace = "adopt", True
+        else:
+            return [Step("json", path, "conflict", label,
+                         "%s already exists and is not managed by podium; use --adopt to take it over" % name)]
+    record = {"before": before, "applied": copy.deepcopy(entry)}
+    if current is not _MISSING and current == entry:
+        return _claude_mcp_steps(ctx, path, pointer, action, [], env, record)
+    return _claude_mcp_steps(ctx, path, pointer, action, _claude_mcp_argvs(claude, name, entry, replace),
+                             env, record)
+
+
+def plan_claude_mcp_remove(ctx: Ctx, claude: Optional[str], env: Mapping[str, str], path: Path,
+                           only: Optional[Collection[str]] = None) -> List[Step]:
+    """Undo the owned `/mcpServers/<name>` entries of Claude's config (all, or those in `only`) through the claude CLI."""
+    steps: List[Step] = []
+    for pointer, rec in sorted((ctx.ledger.json.get(str(path)) or {}).items()):
+        tokens = _tokens(pointer)
+        if len(tokens) != 2 or tokens[0] != "mcpServers":
+            continue
+        if only is not None and pointer not in only:
+            continue
+        name = tokens[1]
+        label = "Claude Code MCP server %s" % name
+        current = _read_claude_server(path, name)
+        if current is _MISSING:
+            steps.append(Step("json", path, "unchanged", label, apply=_drop_claude_entry(ctx, path, pointer)))
+        elif current != rec.get("applied"):
+            steps.append(Step("json", path, "keep", label, "modified since podium wrote it; left in place",
+                              apply=_drop_claude_entry(ctx, path, pointer)))
+        elif claude is None:
+            steps.append(Step("note", None, "skip", "claude not found on PATH; MCP server %s left registered "
+                                                     "in Claude Code" % name))
+        else:
+            before = rec.get("before")
+            argvs = _claude_mcp_argvs(claude, name, before, True)
+            steps.extend(_claude_mcp_steps(ctx, path, pointer, "remove", argvs, env, None))
+    return steps
+
+
+def _drop_claude_entry(ctx: Ctx, path: Path, pointer: str) -> Callable[[], None]:
+    def apply() -> None:
+        owned = ctx.ledger.json.get(str(path), {})
+        owned.pop(pointer, None)
+        if not owned:
+            ctx.ledger.json.pop(str(path), None)
+        ctx.ledger.save()
+
+    return apply
 
 
 # --------------------------------------------------------------------------- install plan
@@ -671,18 +853,71 @@ def build_install_steps(
     runtime = (json.dumps(runtime_document(paths, config), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     steps.append(plan_file(ctx, runtime_path(paths), runtime, "hook runtime", generated=True))
 
+    # Prune what podium owns for modules the config disables (modules left out of --modules are not touched).
+    disabled = [m for m in ALL_MODULES if not config["modules"].get(m, False) and (modules is None or m in modules)]
+    memory_unused = "memory" in disabled or ("memory" in active and not config["memory"]["url"])
+    memory_server = config["memory"]["mcp_server"]
+    steps.extend(_prune_disabled(paths, ctx, disabled, memory_unused, memory_server))
+
     plugins = [plugin for module, plugin in PLUGIN_BY_MODULE if module in active]
-    if plugins:
+    stale_plugins = [plugin for module, plugin in PLUGIN_BY_MODULE if module in disabled]
+    claude_mcp = "memory" in active and bool(config["memory"]["url"])
+    claude_cfg = claude_user_config_path(paths, env)
+    mcp_pointer = _claude_mcp_pointer(memory_server)
+    stale_mcp = memory_unused and mcp_pointer in (ctx.ledger.json.get(str(claude_cfg)) or {})
+    if plugins or claude_mcp or stale_plugins or stale_mcp:
         claude = find_claude(env)
         if claude is None:
-            steps.append(Step("note", None, "skip", "claude not found on PATH; Claude Code plugins not installed"))
+            if plugins or claude_mcp:
+                steps.append(Step("note", None, "skip", "claude not found on PATH; Claude Code plugins%s not installed"
+                                  % (" and memory MCP server" if claude_mcp else "")))
+            else:
+                steps.append(Step("note", None, "skip", "claude not found on PATH; Claude Code plugins%s of "
+                                  "disabled modules not removed" % (" and memory MCP server" if stale_mcp else "")))
         else:
-            steps.append(_exec_step("marketplace", [claude, "plugin", "marketplace", "add", str(podium_home)],
-                                    env, fatal=True, tolerate=("already",)))
+            if plugins:
+                steps.append(_exec_step("marketplace", [claude, "plugin", "marketplace", "add", str(podium_home)],
+                                        env, fatal=True, tolerate=("already",)))
             for plugin in plugins:
                 steps.append(_exec_step(plugin, [claude, "plugin", "install",
                                                  "%s@%s" % (plugin, MARKETPLACE_NAME), "--scope", "user"],
                                         env, fatal=False, tolerate=("already",)))
+            for plugin in stale_plugins:
+                steps.append(_exec_step(plugin, [claude, "plugin", "uninstall",
+                                                 "%s@%s" % (plugin, MARKETPLACE_NAME), "--scope", "user"],
+                                        env, fatal=False, tolerate=("not installed", "not found")))
+            if claude_mcp:
+                steps.extend(plan_claude_mcp(ctx, claude, env, claude_cfg, memory_server,
+                                             _claude_memory_entry(config["memory"])))
+            if stale_mcp:
+                steps.extend(plan_claude_mcp_remove(ctx, claude, env, claude_cfg, only={mcp_pointer}))
+    return steps
+
+
+def _prune_disabled(paths: Paths, ctx: Ctx, disabled: Sequence[str], memory_unused: bool,
+                    memory_server: str) -> List[Step]:
+    """Removal steps for what the ledger says podium owns for `disabled` modules (and an unused memory server)."""
+    steps: List[Step] = []
+    if "rules" in disabled:
+        for target_id, path in block_targets(paths).items():
+            step = plan_block_remove(ctx, path, target_id)
+            if step.action != "unchanged":
+                steps.append(step)
+    if "executors" in disabled:
+        steps.extend(_prune_stale(ctx, paths.opencode_config_dir / "agents", set()))
+        profile = profile_path(paths)
+        if str(profile) in ctx.ledger.files:
+            steps.append(plan_file_remove(ctx, profile, [paths.opencode_config_dir, paths.claude_dir,
+                                                         paths.state_dir, paths.config_dir, paths.home]))
+    if "memory" in disabled:
+        steps.extend(_prune_stale(ctx, paths.opencode_config_dir / "skills", set()))
+    pointers: Set[str] = set()
+    if memory_unused:
+        pointers.add("/mcp/%s" % memory_server.replace("~", "~0").replace("/", "~1"))
+    if "codegraph" in disabled:
+        pointers.add("/mcp/codegraph")
+    if pointers:
+        steps.extend(plan_json_remove(ctx, opencode_json_path(paths), only=pointers))
     return steps
 
 
@@ -704,8 +939,12 @@ def build_uninstall_steps(paths: Paths, ctx: Ctx, env: Mapping[str, str]) -> Lis
     stops = [paths.opencode_config_dir, paths.claude_dir, paths.state_dir, paths.config_dir, paths.home]
     for key in sorted(ledger.files):
         steps.append(plan_file_remove(ctx, Path(key), stops))
+    claude = find_claude(env)
     for key in sorted(ledger.json):
-        steps.extend(plan_json_remove(ctx, Path(key)))
+        if _is_claude_user_config(Path(key)):
+            steps.extend(plan_claude_mcp_remove(ctx, claude, env, Path(key)))
+        else:
+            steps.extend(plan_json_remove(ctx, Path(key)))
     return steps
 
 

@@ -241,5 +241,44 @@ class CliTest(coretest.CoreCase):
         self.assertEqual(code, 3)
         self.assertFalse((self.claude_dir / "CLAUDE.md").exists())
 
+    def test_doctor_fails_when_legacy_hook_coexists_with_podium_plugin(self):
+        # Real detect (no stubs): write a settings.json with a legacy
+        # ``codegraph-gate.py`` hook *and* ``enabledPlugins`` enabling the
+        # ``podium-codegraph@podium`` plugin. ``podium doctor`` must FAIL on
+        # ``hooks`` and return the documented environment-exit code 3.
+        import contextlib, io
+        from podium import cli
+        repo = Path(__file__).resolve().parents[1]
+        self.claude_dir.mkdir(parents=True, exist_ok=True)
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Read|Edit|Write",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "python3",
+                                "args": [
+                                    "/Users/legacy/.claude/hooks/codegraph-gate.py"
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            "enabledPlugins": {"podium-codegraph@podium": True},
+        }
+        (self.claude_dir / "settings.json").write_text(
+            json.dumps(settings), encoding="utf-8"
+        )
+        self.write_config()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main(["doctor"], env=self.env, podium_home=repo)
+        output = out.getvalue()
+        self.assertEqual(code, 3, output)
+        self.assertIn("[FAIL] hooks", output)
+
 if __name__ == "__main__":
     unittest.main()

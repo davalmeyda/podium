@@ -8,6 +8,8 @@ fragments = [
   { id = "habits", module = "rules" },
   { id = "orchestration", module = "rules" },
   { id = "roster", module = "rules" },
+  { id = "roster-opencode", module = "rules", requires = "opencode-executors" },
+  { id = "roster-cascade", module = "rules" },
   { id = "principal-decides", module = "rules" },
   { id = "cost-model", module = "rules" },
   { id = "context-diet", module = "rules" },

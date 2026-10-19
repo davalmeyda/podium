@@ -67,7 +67,9 @@ def resolve_paths(env=None):
             runtime = _merge_runtime(runtime, loaded, env)
         except Exception:
             log_error(paths["state_dir"], "_runtime", "runtime.json unreadable, using defaults")
-    return paths, runtime
+    # runtime["paths"] already holds the runtime.json overrides: the consumers
+    # must read those merged values, not the built-in defaults.
+    return dict(runtime["paths"]), runtime
 
 
 def _default_runtime(paths):
@@ -131,32 +133,88 @@ def _merge_runtime(base, extra, env):
 
 # --- locale ---------------------------------------------------------------
 
+_REQUIRED_LOCALE_KEYS = (
+    ("labels", "yes"),
+    ("labels", "no"),
+    ("gate", "deny_pending"),
+    ("gate", "deny_index_pending"),
+    ("nudge", "available"),
+)
+
+
+def _locale_usable(data):
+    """True when every key the hooks read is a non-empty string."""
+    if not isinstance(data, dict):
+        return False
+    for section, key in _REQUIRED_LOCALE_KEYS:
+        value = data.get(section)
+        if not isinstance(value, dict) or not isinstance(value.get(key), str) or not value.get(key):
+            return False
+    return True
+
+
 def load_locale(ui, plugin_root):
-    """Load locales/<ui>.json; fall back to en; fall back to built-in minimum."""
+    """Load locales/<ui>.json, then locales/en.json, then the built-in English copy.
+
+    A bundle missing a key the hooks use counts as broken, so a missing or
+    broken locale never leaves a hook without its labels or templates."""
     ui = ui if ui in ("en", "es") else "en"
     plugin_root = Path(plugin_root)
-    candidate = plugin_root / "locales" / f"{ui}.json"
-    if not candidate.is_file() and ui != "en":
-        candidate = plugin_root / "locales" / "en.json"
-    if candidate.is_file():
+    for lang in dict.fromkeys((ui, "en")):
+        candidate = plugin_root / "locales" / f"{lang}.json"
+        if not candidate.is_file():
+            continue
         try:
             with open(candidate, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
         except Exception:
-            pass
-    return _minimal_locale(ui)
+            continue
+        if _locale_usable(data):
+            return data
+    return _builtin_locale()
 
 
-def _minimal_locale(ui):
-    if ui == "es":
-        return {
-            "options": {"index_now": "Indexar ahora", "no_index": "No indexar"},
-            "labels": {"yes": "Indexar ahora", "no": "No indexar"},
-        }
+def _builtin_locale():
+    """English copy of locales/en.json: the last resort when no bundle is usable."""
     return {
         "options": {"index_now": "Index now", "no_index": "Do not index"},
         "labels": {"yes": "Index now", "no": "Do not index"},
+        "nudge": {
+            "available": "CodeGraph index available ({roots}). To understand or locate code, prefer `codegraph_explore` (projectPath = the index root) over grep/find/Read: one call returns the symbols' verbatim source plus call paths. Use grep only for literal text, config or non-code files, or the exact file you are about to edit.",
+        },
+        "gate": {
+            "deny_pending": "Project {root} is not indexed with CodeGraph and the user has not decided whether to index it. BEFORE working on it, ask the user with AskUserQuestion. The question must contain the word 'CodeGraph' and the path '{root}', with exactly these two options: '{yes}' and '{no}'. If you are a subagent without AskUserQuestion, stop and report to the principal that this decision is missing. Running or querying a `codegraph ...` command is never blocked.",
+            "deny_index_pending": "The user approved indexing {root} with CodeGraph but the index does not exist yet. Run `codegraph init {root}` now (in background if the project is large) before working on that project.",
+        },
     }
+
+
+# --- project search boundaries ---
+
+def search_tops(abspath, home, roots):
+    """Boundaries a project or index search may walk within, as (top, inclusive).
+
+    HOME is exclusive, as before: a path equal to HOME is never a project or
+    index. Each configured root that contains the path is inclusive, so a
+    manifest or .codegraph AT the root is found too."""
+    tops = []
+    if home:
+        tops.append((os.path.abspath(os.path.expanduser(home)), False))
+    for root in roots or ():
+        if not isinstance(root, str) or not root:
+            continue
+        top = os.path.abspath(os.path.expanduser(root))
+        if within_top(abspath, top, True):
+            tops.append((top, True))
+    return tops
+
+
+def within_top(d, top, inclusive):
+    """True when directory `d` lies under `top` (and is `top` itself when inclusive)."""
+    if d == top:
+        return inclusive
+    prefix = top if top.endswith(os.sep) else top + os.sep
+    return d.startswith(prefix)
 
 
 # --- logging --------------------------------------------------------------

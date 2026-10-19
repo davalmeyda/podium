@@ -58,6 +58,15 @@ The harness reads two environment variables:
 
 Both variables are read by `test/run.sh`. The image build is driven by `test/docker/Dockerfile`; the in-container scenario lives in `test/e2e.sh`.
 
+### Scenario battery (one fresh container per scenario, in parallel)
+
+```sh
+test/run-scenarios.sh                       # every scenario
+test/run-scenarios.sh memory-stop smoke     # only these
+```
+
+Each `test/scenarios/<name>.sh` declares what it needs in its header (`# needs: none`, `claude` or `opencode`); scenarios whose credentials are missing are reported as skipped. The same `CLAUDE_TOKEN_FILE` / `OPENCODE_AUTH_FILE` variables apply, plus `MAX_JOBS` (parallel containers, default 8), `NO_BUILD=1` (reuse the image) and `KEEP=1`. Logs land in `test/.out/<name>.log`. New behaviour gets a check in the scenario that exercises it; checks assert on the filesystem and real CLI output, never on a model's wording.
+
 ## Project principles
 
 These come straight from `docs/ARCHITECTURE.md` §1 and are not negotiable in a contribution:

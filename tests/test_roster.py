@@ -136,7 +136,9 @@ class BulletAndLaunchTests(unittest.TestCase):
     def test_excluded_non_empty(self):
         cfg = _basic_config()
         text = roster.generated(cfg)["roster_excluded"]
-        self.assertEqual(text, "- opus — capacity held in reserve")
+        self.assertEqual(
+            text, "Models deliberately excluded from the roster (and why):\n\n- opus — capacity held in reserve"
+        )
 
     def test_excluded_empty_returns_empty_string(self):
         cfg = _basic_config()

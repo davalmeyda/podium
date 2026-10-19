@@ -7,7 +7,7 @@ In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the re
 
 If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
 
-**Multi-project folders.** User rule, kept outside the CODEGRAPH block on purpose (`codegraph upgrade` rewrites that block). It overrides the "skip CodeGraph entirely" line above when the current folder is a parent of several projects:
+**Multi-project folders.** This rule overrides the "skip CodeGraph entirely" line above when the current folder is a parent of several projects:
 
 - If the current folder has no `.codegraph/`, look for indexed sub-projects before skipping: `find . -maxdepth 3 -type d -name .codegraph -not -path '*/node_modules/*'`. Skip CodeGraph only if none is found.
 - Query each sub-project by passing its root as `projectPath` to `codegraph_explore` (shell: `codegraph explore -p <root> "<query>"`). For a question that spans several projects, query each one and combine the answers.

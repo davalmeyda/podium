@@ -82,10 +82,12 @@ test('inputTokens excludes cache re-reads and dates are short', async () => {
 test('sorts by model and variant relevance; compactions go last', async () => {
   const row = (engine: 'claude' | 'opencode' | 'compact', model: string, variant = '') =>
     ({ engine, model, variant, in: 0, out: 1, cacheRead: 0, cacheWrite: 0, n: 1, quotaAt: null })
+  const order = ['opus', 'sonnet', 'haiku']
+  const ocOrder = ['gpt-6\\.1-sol', 'gpt-6-luna', 'minimax']
   const claude = byRelevance([
     row('claude', 'claude-haiku-5-5'), row('compact', 'claude-opus-5-5'), row('claude', 'claude-fable-5'),
     row('claude', 'claude-sonnet-5-5'), row('claude', 'claude-opus-5-5'),
-  ], [])
+  ], order)
   expect(claude.map(r => `${r.engine}:${r.model}`)).toEqual([
     'claude:claude-opus-5-5', 'claude:claude-sonnet-5-5', 'claude:claude-haiku-5-5', 'claude:claude-fable-5', 'compact:claude-opus-5-5',
   ])
@@ -93,7 +95,7 @@ test('sorts by model and variant relevance; compactions go last', async () => {
     row('opencode', 'minimax/MiniMax-M3', 'none'), row('opencode', 'kimi/k3', ''), row('opencode', 'openai/gpt-6-luna', 'high'),
     row('opencode', 'minimax/MiniMax-M3', 'thinking'), row('opencode', 'openai/gpt-6.1-sol', 'high'),
     row('opencode', 'openai/gpt-6.1-sol', ''), row('opencode', 'openai/gpt-6.1-sol', 'xhigh'),
-  ], [])
+  ], ocOrder)
   expect(oc.map(r => `${r.model}#${r.variant}`)).toEqual([
     'openai/gpt-6.1-sol#xhigh', 'openai/gpt-6.1-sol#high', 'openai/gpt-6.1-sol#', 'openai/gpt-6-luna#high',
     'minimax/MiniMax-M3#thinking', 'minimax/MiniMax-M3#none', 'kimi/k3#',
@@ -109,20 +111,51 @@ test('model_order from config drives relevance', async () => {
   expect(sorted).toEqual(['claude-haiku-5-5', 'claude-opus-5-5', 'kimi/k3'])
 })
 
-test('buildModelOrder compiles fragments and falls back on bad input', () => {
+test('buildModelOrder compiles fragments and signals null on unusable input', () => {
   const compiled = buildModelOrder(['opus', 'sonnet'])
-  expect(compiled.length).toBe(2)
-  expect(compiled[0]!.test('claude-opus-5-5')).toBe(true)
-  expect(compiled[1]!.test('sonnet-5')).toBe(true)
+  expect(compiled).not.toBeNull()
+  expect(compiled!.length).toBe(2)
+  expect(compiled![0]!.test('claude-opus-5-5')).toBe(true)
+  expect(compiled![1]!.test('sonnet-5')).toBe(true)
 
   // Invalid regex fragment is skipped, valid ones kept.
   const partial = buildModelOrder(['opus', '[unbalanced'])
-  expect(partial.length).toBe(1)
+  expect(partial).not.toBeNull()
+  expect(partial!.length).toBe(1)
 
-  // Empty input → default order (length > 0).
-  const def = buildModelOrder([])
-  expect(def.length).toBeGreaterThan(0)
-  expect(def[0]!.test('claude-opus')).toBe(true)
+  // Empty input → null so the caller can fall back to the neutral ordering.
+  const none = buildModelOrder([])
+  expect(none).toBeNull()
+
+  // All-invalid input → null for the same reason.
+  const allBad = buildModelOrder(['[unbalanced', '(('])
+  expect(allBad).toBeNull()
+})
+
+test('byRelevance falls back to total-tokens order with no fragments', () => {
+  const row = (model: string, in_: number, out: number) =>
+    ({ engine: 'claude' as const, model, variant: '', in: in_, out, cacheRead: 0, cacheWrite: 0, n: 1, quotaAt: null })
+  const out_rows = byRelevance([
+    row('claude-haiku-5-5', 1, 1), row('claude-opus-5-5', 100, 50), row('claude-sonnet-5-5', 10, 10),
+  ], [])
+  // Total tokens: opus 150, sonnet 20, haiku 2 — desc.
+  expect(out_rows.map(r => r.model)).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'])
+  // Compactions trail everything else even with the fallback.
+  const compact = { engine: 'compact' as const, model: 'claude-opus-5-5', variant: '', in: 999, out: 999, cacheRead: 0, cacheWrite: 0, n: 1, quotaAt: null }
+  expect(byRelevance([row('claude-haiku-5-5', 0, 0), compact], []).map(r => r.engine)).toEqual(['claude', 'compact'])
+})
+
+test('Claude shows the effort bucket and orders it within the model', () => {
+  const base = { engine: 'claude', in: 1, out: 1, cacheRead: 0, cacheWrite: 0, n: 1, quotaAt: null } as const
+  // Regression test ported from the original (lib.test.ts:86-95): effort is the
+  // row's variant and is reflected in the label.
+  const sorted = byRelevance([
+    { ...base, model: 'claude-sonnet-5-5', variant: 'medium' },
+    { ...base, model: 'claude-opus-5-5', variant: 'medium' },
+    { ...base, model: 'claude-opus-5-5', variant: 'high' },
+  ], ['opus', 'sonnet'])
+  expect(sorted.map(r => label(r, enLocale))).toEqual(['opus-5-5 #high', 'opus-5-5 #medium', 'sonnet-5-5 #medium'])
+  expect(label({ ...base, model: 'claude-opus-5-5', variant: '' }, enLocale)).toBe('opus-5-5')
 })
 
 test('locale switching changes shortDate weekday names', () => {

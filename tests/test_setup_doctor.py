@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import redirect_stdout
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -199,13 +200,45 @@ class DoctorRunTests(unittest.TestCase):
     def test_hooks_log_recent_activity_warns(self) -> None:
         state = Path(self._paths()["state_dir"])
         state.mkdir(parents=True, exist_ok=True)
-        from datetime import datetime, timezone
-
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         (state / "hooks.log").write_text(f"{stamp} codegraph-gate oops\n")
         _, output = self._capture(config={})
         self.assertIn("[WARN] hooks.log", output)
         self.assertIn("codegraph-gate", output)
+
+    def test_hooks_log_naive_local_recent_activity_warns(self) -> None:
+        # Hooks write ``time.strftime("%Y-%m-%dT%H:%M:%S")`` (no TZ); doctor
+        # must treat naive stamps as local time and still surface the line.
+        state = Path(self._paths()["state_dir"])
+        state.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        (state / "hooks.log").write_text(f"{stamp} codegraph-gate stdin json: bad\n")
+        _, output = self._capture(config={})
+        self.assertIn("[WARN] hooks.log", output)
+        self.assertIn("codegraph-gate", output)
+
+    def test_hooks_log_old_activity_ok(self) -> None:
+        state = Path(self._paths()["state_dir"])
+        state.mkdir(parents=True, exist_ok=True)
+        old = datetime.now(timezone.utc) - timedelta(hours=48)
+        stamp = old.strftime("%Y-%m-%dT%H:%M:%SZ")
+        (state / "hooks.log").write_text(f"{stamp} codegraph-gate too old\n")
+        _, output = self._capture(config={})
+        self.assertIn("[OK] hooks.log", output)
+        self.assertNotIn("[WARN] hooks.log", output)
+
+    def test_hooks_log_unparsable_line_skipped(self) -> None:
+        state = Path(self._paths()["state_dir"])
+        state.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # The first line has a corrupt timestamp; the second is a valid
+        # recent stamp. doctor must skip the bad line and WARN on the good.
+        (state / "hooks.log").write_text(
+            f"not-a-date codegraph-gate garbage\n{stamp} codegraph-gate real\n"
+        )
+        _, output = self._capture(config={})
+        self.assertIn("[WARN] hooks.log", output)
+        self.assertIn("codegraph-gate real", output)
 
     def test_memory_url_reachable_ok(self) -> None:
         server = _StubServer()

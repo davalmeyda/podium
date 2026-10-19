@@ -60,6 +60,27 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("Gamma", text)
         self.assertIn("Delta", text)
 
+    def test_requires_opencode_executors(self):
+        rules = self.home / "rules"
+        with (rules / "manifest.toml").open("a", encoding="utf-8") as fh:
+            fh.write('\n[[target]]\nid = "req"\nfragments = [\n'
+                     '  { id = "req-oc", requires = "opencode-executors" },\n  { id = "req-all" },\n]\n')
+        (rules / "req-oc.md").write_text("OpenCode part\n", encoding="utf-8")
+        (rules / "req-all.md").write_text("Common part\n", encoding="utf-8")
+        claude_only = {"roster": [{"id": "p", "launch": {"kind": "principal"}}]}
+        with_opencode = {"roster": [{"id": "w", "launch": {"kind": "opencode", "agent": "w"}}]}
+        self.assertEqual(self.render("req", claude_only), "Common part\n")
+        self.assertEqual(self.render("req", with_opencode), "OpenCode part\n\nCommon part\n")
+        with (rules / "manifest.toml").open("a", encoding="utf-8") as fh:
+            fh.write('\n[[target]]\nid = "bad"\nfragments = [ { id = "req-all", requires = "nope" } ]\n')
+        with self.assertRaisesRegex(render.RenderError, "unknown requirement: nope"):
+            self.render("bad", with_opencode)
+
+    def test_empty_generated_block_leaves_no_blank_run(self):
+        self.overlay("claude-md", "alpha.md", "Head\n\n{{ vars.empty }}\n\nTail\n")
+        cfg = config.from_dict({"render": {"vars": {"empty": "", "team": "acme"}}}, {})
+        self.assertIn("Head\n\nTail", self.render(cfg=cfg))
+
     def test_other_targets_and_sources(self):
         self.assertEqual(self.render("opencode-agents-md").count("# Alpha"), 1)
         profile = self.render("executor-profile")

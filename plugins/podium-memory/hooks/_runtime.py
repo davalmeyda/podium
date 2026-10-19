@@ -121,30 +121,60 @@ def load_runtime(paths, env=None):
                 data = json.load(fh)
         except Exception as exc:
             log_hook_error(paths, "runtime-load", str(exc))
+    if not isinstance(data, dict):
+        log_hook_error(paths, "runtime-load", "runtime.json is not a JSON object, using defaults")
+        data = {}
     cfg = _deep_merge(_BUILTIN_DEFAULTS, data)
-    cfg["paths"] = _deep_merge(paths, cfg.get("paths") or {})
+    overrides = cfg.get("paths")
+    # runtime["paths"] holds the merged values: consumers must use these, not `paths`.
+    cfg["paths"] = _deep_merge(paths, overrides if isinstance(overrides, dict) else {})
     cfg["ui"] = cfg.get("ui") or env.get("PODIUM_UI") or "en"
     return cfg
 
 
 # --- locales ---
 
-def load_locale(plugin_dir, ui):
-    """Load locales/<ui>.json from a plugin directory, fallback to 'en'."""
+def _locale_usable(data):
+    """True when the stop reason the hook emits is a non-empty string."""
+    if not isinstance(data, dict):
+        return False
+    stop = data.get("stop")
+    return isinstance(stop, dict) and isinstance(stop.get("reason"), str) and bool(stop.get("reason"))
+
+
+def load_locale(plugin_dir, ui, paths=None):
+    """Load locales/<ui>.json from a plugin directory, then 'en', then the built-in English copy.
+
+    A bundle without a usable stop reason counts as broken, so the hook never
+    emits a blocking decision with an empty reason."""
     plugin_dir = Path(plugin_dir)
-    for lang in (ui, "en"):
+    for lang in dict.fromkeys((ui, "en")):
         candidate = plugin_dir / "locales" / f"{lang}.json"
-        if candidate.is_file():
-            try:
-                with open(candidate, "r", encoding="utf-8") as fh:
-                    return json.load(fh)
-            except Exception as exc:
-                log_hook_error(
-                    {"state_dir": str(plugin_dir.parent.parent)},
-                    "locale-load",
-                    f"{lang}: {exc}",
-                )
-    return {}
+        if not candidate.is_file():
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception as exc:
+            log_hook_error(
+                paths if paths is not None else resolve_paths(),
+                "locale-load",
+                f"{lang}: {exc}",
+            )
+            continue
+        if _locale_usable(data):
+            return data
+    return builtin_locale()
+
+
+def builtin_locale():
+    """English copy of locales/en.json: the last resort when no bundle is usable."""
+    return {
+        "stop": {
+            "reason": "Substantial work happened since the last memory save ({edits} file edits, {executors} executor runs). Without calling any tools, decide: would a future session do something wrong or redo work without a log entry (completed milestone, decision + reason, pending work / next step, non-obvious fix)? If yes, load the `podium-memory:project-memory` skill and save ONE dense entry covering everything since the last save, then tell the user in one line. If there is nothing worth recording, reply only with \"Nothing to record in memory.\" and stop.",
+            "nothing_to_record": "Nothing to record in memory.",
+        },
+    }
 
 
 # --- hooks.log ---

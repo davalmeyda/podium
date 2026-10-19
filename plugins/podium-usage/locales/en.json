@@ -20,5 +20,6 @@
   "no_variant": "no variant",
   "compaction_suffix": "compaction ×",
   "short_today": "today ",
+  "reader_error": "reader: ",
   "weekdays": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 }

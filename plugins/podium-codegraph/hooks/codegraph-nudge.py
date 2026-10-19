@@ -18,19 +18,17 @@ import _runtime  # noqa: E402
 _SKIP_DIRS = {"node_modules", "Library", ".git", "dist", "build", ".next", "vendor"}
 
 
-def ancestors_index(path, roots):
-    """Walk up from `path` looking for a .codegraph/ inside HOME or roots."""
+def ancestors_index(path, roots, home):
+    """Walk up from `path` looking for a .codegraph/ inside HOME (exclusive)
+    or inside a configured root (inclusive)."""
     d = os.path.abspath(path)
-    for top in (os.path.expanduser("~"),) + tuple(roots or ()):
-        if not top:
-            continue
-        top_abs = os.path.abspath(os.path.expanduser(top))
-        if not (d == top_abs or d.startswith(top_abs + os.sep)):
-            continue
+    for top, inclusive in _runtime.search_tops(d, home, roots):
         cur = d
-        while cur.startswith(top_abs + os.sep) and cur != top_abs:
+        while _runtime.within_top(cur, top, inclusive):
             if os.path.isdir(os.path.join(cur, ".codegraph")):
                 return [cur]
+            if cur == top:
+                break
             parent = os.path.dirname(cur)
             if parent == cur:
                 break
@@ -38,11 +36,10 @@ def ancestors_index(path, roots):
     return []
 
 
-def sub_indexes(root, depth=3):
+def sub_indexes(root, home, depth=3):
     found = []
     root = os.path.abspath(root)
     base = root.count(os.sep)
-    home = os.path.expanduser("~")
     for d, dirs, _ in os.walk(root):
         if ".codegraph" in dirs and d != home:
             found.append(d)
@@ -89,7 +86,8 @@ def main():
 
     key = os.path.abspath(target)
     if key not in state["idx"]:
-        state["idx"][key] = ancestors_index(target, roots) or sub_indexes(target)
+        state["idx"][key] = (ancestors_index(target, roots, paths["home"])
+                             or sub_indexes(target, paths["home"]))
     idx = state["idx"][key]
     if idx:
         state["n"] += 1

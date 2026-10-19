@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `install` registers the memory MCP server in Claude Code (`claude mcp add-json --scope user`), tracked in the ledger and removed on uninstall.
+- `install` prunes what podium owns for modules disabled in `podium.toml` (blocks, agents, skills, MCP pointers, plugins); `--modules` partial runs never prune.
+- `custom` roster preset (principal only, commented examples) for hand-edited rosters.
+- Manifest fragments can declare `requires = "opencode-executors"`: Claude-only rosters no longer receive OpenCode instructions (`roster-opencode` fragment).
+- Container test battery: `test/run-scenarios.sh` runs each `test/scenarios/*.sh` in its own fresh container, in parallel, including real `claude -p` and OpenCode runs when credentials are supplied.
+
+### Changed
+- Rules generalised: project typecheck instead of `tsc`, dependency manifests instead of `package.json`/pnpm only, provider-specific measurements moved out of the generic rules, shared-quota warning, verifiable web-search rule.
+- `agents-upgrade` skill restored to the full workflow: complete release inventory, research floors (3 queries, 2 sources), 30-day usage analysis, budget arithmetic, panel controls, post-apply runtime verification; upgrade results go to the history file, not shared memory.
+- Upgrade scripts: install method decided by package ownership (npm/brew/native), `brew upgrade --cask --greedy`, catalogue checks never abort and report the model recorded in `opencode.db`; preflight compares installed agents and table with the configured roster and excludes the OpenCode service from active sessions.
+- Usage: Claude effort is accounted again (separate rows per effort); neutral default ordering; `/tokens` follows the UI language; malformed runtime/locale JSON falls back to defaults.
+
+### Fixed
+- `doctor` crashed on naive timestamps in `hooks.log` and never reported legacy hooks.
+- `detect` lower-cases OpenCode provider ids and marks podium-owned agents via the ledger.
+- CodeGraph gate: the Bash exemption now requires every command segment to be `codegraph` (was a substring test); Spanish nudge text; configured roots and path overrides honoured; locale fallbacks never disable a hook.
+- Memory hook never emits an empty reason; locale errors are logged to the state dir.
+- `catalogs.sh`: syntax error in the provider loop, `opencode` consuming the loop's stdin, `opencode models` no longer takes a provider argument, variant taken from the roster row.
+- `init` validates `${VAR}` references without requiring them to be set (they expand at install time).
+
 ## [0.1.0] - 2026-10-19
 
 Initial public release of podium.

@@ -1,0 +1,42 @@
+# Roster preset for users who will edit the roster themselves.
+#
+# This preset is appended verbatim by `podium init` below the header it writes
+# (schema, [language], [modules], [principal], [launcher]). Keep only
+# [[roster]], [[agents]] and [roster_notes] here, or the keys collide.
+#
+# Unlike the other presets, this file ships with just the principal row.
+# Add `[[agents]]` and the matching `[[roster]]` entries that reference them
+# under that row (the commented examples below show every field accepted by
+# `podium.config`). `podium init` with `roster_preset = "custom"` does not
+# touch this file; you edit it directly and then run `podium install`.
+
+[[roster]]
+id = "principal"
+engine = "Claude principal"
+model = "session"
+responsibility = "Plan, decisions, briefs, reconciliation, verdict"
+fallback = "—"
+launch = { kind = "principal" }
+
+# --- Example: one OpenCode writer agent -------------------------------------
+# Uncomment this `[[agents]]` block to add a writer agent named `minimax`.
+# Then uncomment the matching `[[roster]]` row below to wire it into the table.
+#
+# [[agents]]
+# name = "minimax"
+# role = "writer"
+# model = "minimax/MiniMax-M3"
+# description = "Default code executor of the cascade."
+# deny_mcp = ["chrome-devtools_*"]
+#
+# [[roster]]
+# id = "minimax-fast"
+# engine = "MiniMax fast"
+# model = "MiniMax-M3 #none"
+# responsibility = "Code from a closed brief, mechanical refactors, run and fix validations, checklist reviews"
+# fallback = "haiku → luna"
+# launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "none" }
+
+[roster_notes]
+cascade = []
+excluded = []

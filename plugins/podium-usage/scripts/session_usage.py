@@ -35,7 +35,10 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCALES_DIR = os.path.join(PLUGIN_ROOT, "locales")
 
 DEFAULT_UI = "en"
-DEFAULT_MODEL_ORDER = ["opus", "sonnet", "haiku", "gpt-6.1-sol", "gpt-6-luna", "gpt", "minimax"]
+# Neutral default for `model_order`. Personal roster model names must NOT live
+# here; the display layer falls back to ordering by total tokens descending
+# when no fragments are configured (see `byRelevance` in hooks/lib.ts).
+DEFAULT_MODEL_ORDER = []
 EN_LOCALE = {
     "pane_title": "Tokens",
     "command_description": "Show the tokens consumed in this session, per model.",
@@ -58,45 +61,64 @@ EN_LOCALE = {
     "no_variant": "no variant",
     "compaction_suffix": "compaction ×",
     "short_today": "today ",
+    "reader_error": "reader: ",
     "weekdays": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
 }
 
 
 def load_runtime():
     """Read runtime.json from the podium config dir. Missing or unreadable →
-    built-in defaults. Invalid → defaults + a recorded error."""
+    built-in defaults. Invalid or wrong-shaped → defaults + a recorded error."""
     errors = []
     ui = DEFAULT_UI
     model_order = list(DEFAULT_MODEL_ORDER)
     path = os.path.join(PODIUM_CONFIG, "runtime.json")
     try:
         with open(path, "rb") as fh:
-            data = json.loads(fh.read().decode("utf-8"))
+            raw = fh.read()
     except FileNotFoundError:
-        pass  # missing → defaults, no error
-    except (OSError, ValueError) as e:
-        errors.append(f"runtime: {e}")
-    else:
-        usage = data.get("usage") or {}
-        if isinstance(usage.get("model_order"), list):
-            fragments = [str(x) for x in usage["model_order"] if isinstance(x, str)]
+        return ui, model_order, errors  # missing → defaults, no error
+    except OSError as e:
+        return ui, model_order, [f"runtime: {e}"]
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        return ui, model_order, [f"runtime: {e}"]
+    if not isinstance(data, dict):
+        return ui, model_order, [f"runtime: expected object, got {type(data).__name__}"]
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        raw_order = usage.get("model_order")
+        if isinstance(raw_order, list):
+            fragments = [str(x) for x in raw_order if isinstance(x, str)]
             if fragments:
                 model_order = fragments
-        if data.get("ui") in ("en", "es"):
-            ui = data["ui"]
+    raw_ui = data.get("ui")
+    if raw_ui in ("en", "es"):
+        ui = raw_ui
     return ui, model_order, errors
 
 
 def load_locale(ui):
-    """Load locales/<ui>.json; fall back to en; fall back to built-in defaults."""
+    """Load locales/<ui>.json; fall back to en; fall back to built-in defaults.
+    A bundle with the wrong shape (array, null, string) is treated as corrupt
+    and emits one error line — accounting still continues with defaults."""
     errors = []
     for try_ui in (ui, DEFAULT_UI):
         path = os.path.join(LOCALES_DIR, try_ui + ".json")
         try:
             with open(path, "rb") as fh:
-                data = json.loads(fh.read().decode("utf-8"))
-        except (OSError, ValueError) as e:
+                raw = fh.read()
+        except OSError as e:
             errors.append(f"locale({try_ui}): {e}")
+            continue
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except ValueError as e:
+            errors.append(f"locale({try_ui}): {e}")
+            continue
+        if not isinstance(data, dict):
+            errors.append(f"locale({try_ui}): expected object, got {type(data).__name__}")
             continue
         weekdays = data.get("weekdays")
         if not isinstance(weekdays, list) or len(weekdays) != 7:
@@ -133,7 +155,10 @@ def claude(sid, rows):
                 # the same message repeats across several lines (one block per line)
                 seen[m.get("id") or d.get("uuid")] = (m["model"], d.get("effort"), u)
     for model, effort, u in seen.values():
-        bump(rows, "claude", model, None, u.get("input_tokens", 0), u.get("output_tokens", 0),
+        # Claude effort, when present in the transcript, is the variant for the
+        # row — different efforts produce separate buckets, matching the
+        # display behaviour in hooks/lib.ts.
+        bump(rows, "claude", model, effort, u.get("input_tokens", 0), u.get("output_tokens", 0),
              u.get("cache_read_input_tokens", 0), u.get("cache_creation_input_tokens", 0))
 
 

@@ -9,7 +9,7 @@
     "no": "No indexar"
   },
   "nudge": {
-    "available": "CodeGraph index available ({roots}). To understand or locate code, prefer `codegraph_explore` (projectPath = the index root) over grep/find/Read: one call returns the symbols' verbatim source plus call paths. Use grep only for literal text, config or non-code files, or the exact file you are about to edit."
+    "available": "Índice de CodeGraph disponible ({roots}). Para entender o ubicar código, preferí `codegraph_explore` (projectPath = la raíz del índice) en lugar de grep/find/Read: una llamada devuelve el código literal de los símbolos más sus rutas de llamada. Usá grep solo para texto literal, archivos de configuración o que no son código, o el archivo exacto que vas a editar."
   },
   "gate": {
     "deny_pending": "El proyecto {root} no está indexado con CodeGraph y el usuario todavía no decidió si indexarlo. ANTES de trabajar en él, preguntale al usuario con AskUserQuestion. La pregunta debe contener literalmente 'CodeGraph' y la ruta '{root}', con exactamente estas dos opciones: '{yes}' y '{no}'. Si sos un subagente sin AskUserQuestion, detenete y reportá al principal que falta esta decisión. Indexar o consultar con un comando `codegraph ...` no se bloquea.",

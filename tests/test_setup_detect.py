@@ -39,6 +39,14 @@ _STUBS = {
     "git": "#!/bin/sh\necho 'git version 2.39.0'\n",
 }
 
+# Real ``opencode auth list`` output (per recon-facts.md): display name,
+# auth method, status. The provider id is the first whitespace-separated token,
+# lower-cased.
+_OPENCODE_AUTH_LIST_REAL = (
+    "MiniMax (minimax.io)  API key  stored\n"
+    "OpenAI  OAuth  stored\n"
+)
+
 
 class DetectShapeTests(unittest.TestCase):
     """The output envelope must match the contract key-for-key."""
@@ -165,6 +173,54 @@ class DetectOpencodeSectionTests(unittest.TestCase):
         }
         self.assertTrue(agents_map["minimax"])
         self.assertFalse(agents_map["user-agent"])
+
+    def test_agent_marked_owned_via_ledger(self) -> None:
+        # Defect 5: agents written by `podium install` carry no marker and are
+        # not named ``podX-...``; the only authoritative record is the ledger
+        # at ``state_dir/owned.json``. An agent whose absolute path is in the
+        # ledger's ``files`` map must be reported as podium-owned.
+        cfg = self.tmp / "opencode_cfg"
+        agents = cfg / "agents"
+        agents.mkdir(parents=True)
+        agent = agents / "minimax.md"
+        agent.write_text(
+            "---\ndescription: writer\nmode: primary\n"
+            "model: minimax/MiniMax-M3\n---\n# body without marker\n"
+        )
+        state = self.tmp / ".local" / "state" / "podium"
+        state.mkdir(parents=True)
+        ledger = {"files": {str(agent): "deadbeef" * 8}, "json": {}}
+        (state / "owned.json").write_text(json.dumps(ledger))
+        snapshot = detect.run(self._paths(cfg))
+        agents_map = {
+            entry["name"]: entry["podium_owned"]
+            for entry in snapshot["opencode"]["agents"]
+        }
+        self.assertTrue(agents_map["minimax"])
+
+    def test_opencode_providers_parse_real_output(self) -> None:
+        # The stub opencode from setUp prints nothing for ``auth list``; rewrite
+        # it to emit the real v2 output (display names with a parenthesised id,
+        # auth method, status) plus a header banner and a comment line. Only
+        # ``minimax`` and ``openai`` must come out, lower-cased and in order.
+        self.stubs.joinpath("opencode").write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"list\" ]; then\n"
+            "cat <<'EOF'\n"
+            "== Providers ==\n"
+            + _OPENCODE_AUTH_LIST_REAL
+            + "# trailing comment line\n"
+            "EOF\n"
+            "else\n"
+            "echo 'opencode 2.10.0'\n"
+            "fi\n"
+        )
+        cfg = self.tmp / "opencode_cfg"
+        cfg.mkdir()
+        snapshot = detect.run(self._paths(cfg))
+        self.assertEqual(
+            snapshot["opencode"]["providers"], ["minimax", "openai"]
+        )
 
 
 class DetectClaudeSectionTests(unittest.TestCase):

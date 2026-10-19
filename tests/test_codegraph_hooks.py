@@ -282,6 +282,69 @@ class GateHookTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(out.strip(), "")
 
+    def test_codegraph_bash_chained_is_exempt(self):
+        """Defect 8: a chained `codegraph` command must be exempt. Only
+        every segment being a codegraph call (or `cd`) keeps the gate open."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            project = _make_project(tmp / "home", "app")
+            _write_runtime(str(cfg_dir), state_dir)
+            env = _make_env(tmp)
+            for cmd in (
+                "codegraph status && codegraph explore \"q\"",
+                "codegraph status || codegraph init /x",
+                "codegraph status; codegraph explore foo",
+                "cd /x && codegraph init .",
+                "/usr/local/bin/codegraph init /x",
+            ):
+                payload = {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": cmd},
+                    "cwd": project,
+                }
+                env["__STDIN__"] = json.dumps(payload)
+                rc, out, _ = _run_hook(GATE, env)
+                self.assertEqual(rc, 0, msg=cmd)
+                self.assertEqual(out.strip(), "", msg=cmd)
+
+    def test_codegraph_bash_mixed_with_other_cmands_is_gated(self):
+        """Defect 8: substring matching is not enough. A command that just
+        MENTIONS codegraph but runs something else must be gated normally."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            project = _make_project(tmp / "home", "app")
+            _write_runtime(str(cfg_dir), state_dir)
+            env = _make_env(tmp)
+            for cmd in (
+                "cat /x/secret # codegraph",
+                "codegraph status; cat /x/f",
+                "ls /x | grep codegraph",
+                "rm /x; codegraph init /x",
+                "cat /x || codegraph status",
+                "echo codegraph",
+            ):
+                payload = {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": cmd},
+                    "cwd": project,
+                }
+                env["__STDIN__"] = json.dumps(payload)
+                rc, out, _ = _run_hook(GATE, env)
+                self.assertEqual(rc, 0, msg=cmd)
+                self.assertTrue(out.strip(), msg=cmd)
+                data = json.loads(out)
+                self.assertEqual(
+                    data["hookSpecificOutput"]["permissionDecision"],
+                    "deny",
+                    msg=cmd,
+                )
+
     def test_gate_disabled_in_runtime(self):
         with _safe_tempdir() as td:
             tmp = Path(td)
@@ -581,6 +644,195 @@ class NudgeHookTests(unittest.TestCase):
                 if out.strip():
                     fired.append(n)
             self.assertEqual(fired, [1, 3, 5])
+
+    def test_nudge_text_is_spanish_for_es_ui(self):
+        """Defect 6: es.json nudge.available used to be the English string
+        (identical to en.json). After the fix it must be Spanish, in voseo
+        like the rest of the es strings, with the {roots} placeholder
+        formatted at runtime."""
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir(parents=True, exist_ok=True)
+            project = home / "billing-service"
+            project.mkdir(parents=True, exist_ok=True)
+            (project / "package.json").write_text("{}")
+            (project / ".codegraph").mkdir()
+
+            out = self._nudge(tmp, {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Grep",
+                "tool_input": {"path": str(project)},
+                "cwd": str(project),
+            }, runtime_kwargs={"ui": "es"})
+            data = json.loads(out)
+            msg = data["hookSpecificOutput"]["additionalContext"]
+            # Spanish (not English) and voseo verb forms.
+            self.assertIn("Índice de CodeGraph", msg)
+            self.assertIn("preferí", msg)
+            self.assertIn("Usá grep", msg)
+            # The English string must not be there.
+            self.assertNotIn("CodeGraph index available", msg)
+            self.assertNotIn("prefer `codegraph_explore`", msg)
+            # The {roots} placeholder is substituted at runtime with the
+            # project path that hosts the index.
+            self.assertIn(str(project), msg)
+            # The literal placeholder must NOT leak through; only the
+            # formatted value should be present.
+            self.assertNotIn("{roots}", msg)
+
+
+class ConfiguredRootsAndFallbackTests(unittest.TestCase):
+    """Configured roots, runtime path overrides and locale fallbacks."""
+
+    def _hook(self, hook, env, payload):
+        run_env = dict(env)
+        run_env["__STDIN__"] = json.dumps(payload)
+        return _run_hook(hook, run_env)
+
+    def _read_payload(self, path):
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Read",
+            "tool_input": {"file_path": path},
+            "cwd": os.path.dirname(path),
+        }
+
+    def _grep_payload(self, path, session_id="s1"):
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Grep",
+            "tool_input": {"path": path},
+            "cwd": path,
+            "session_id": session_id,
+        }
+
+    def _copy_plugin(self, tmp, locales):
+        """Copy the hook scripts into a plugin tree whose locales/ holds `locales`."""
+        plugin = tmp / "plugin"
+        hooks = plugin / "hooks"
+        hooks.mkdir(parents=True)
+        for name in ("_runtime.py", "codegraph-gate.py", "codegraph-nudge.py"):
+            shutil.copy(PLUGIN_HOOKS / name, hooks / name)
+        (plugin / "locales").mkdir()
+        for name, content in locales.items():
+            (plugin / "locales" / name).write_text(content, encoding="utf-8")
+        return hooks / "codegraph-gate.py", hooks / "codegraph-nudge.py"
+
+    def test_configured_root_project_is_discovered_and_gated(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            external = tmp / "external"
+            external.mkdir()
+            project = _make_project(external, "app")
+            _write_runtime(str(tmp / "config"), str(tmp / "state"), roots=[str(external)])
+            rc, out, _ = self._hook(GATE, _make_env(tmp),
+                                    self._read_payload(os.path.join(project, "foo.txt")))
+            self.assertEqual(rc, 0)
+            data = json.loads(out)
+            self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn(project, data["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_index_at_configured_root_is_found_from_descendant(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            external = tmp / "external"
+            (external / ".codegraph").mkdir(parents=True)
+            project = _make_project(external, "app")
+            (Path(project) / "src").mkdir()
+            _write_runtime(str(tmp / "config"), str(tmp / "state"), roots=[str(external)])
+            rc, out, _ = self._hook(GATE, _make_env(tmp),
+                                    self._read_payload(os.path.join(project, "src", "x.py")))
+            self.assertEqual(rc, 0)
+            self.assertEqual(out.strip(), "")
+
+    def test_nudge_finds_index_at_configured_root(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            external = tmp / "external"
+            (external / ".codegraph").mkdir(parents=True)
+            project = _make_project(external, "app")
+            _write_runtime(str(tmp / "config"), str(tmp / "state"), roots=[str(external)])
+            rc, out, _ = self._hook(NUDGE, _make_env(tmp), self._grep_payload(project))
+            self.assertEqual(rc, 0)
+            msg = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn(str(external), msg)
+
+    def test_runtime_path_overrides_drive_gate_and_nudge_state(self):
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            state_cfg = tmp / "state-cfg"
+            project = _make_project(tmp / "home", "app")
+            _write_runtime(str(tmp / "config"), str(state_cfg))
+            env = _make_env(tmp)  # PODIUM_STATE_DIR points elsewhere on purpose
+            question = f"Index {project} with CodeGraph now?"
+            ask = {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": question}]},
+                "tool_response": {"answers": {question: "Do not index"}},
+            }
+            rc, _, _ = self._hook(GATE, env, ask)
+            self.assertEqual(rc, 0)
+            decisions = state_cfg / "codegraph-decisions.json"
+            self.assertTrue(decisions.is_file())
+            self.assertEqual(json.loads(decisions.read_text())["decisions"][project], "skip")
+            self.assertFalse((tmp / "state" / "codegraph-decisions.json").exists())
+
+            rc, _, _ = self._hook(NUDGE, env, self._grep_payload(project))
+            self.assertEqual(rc, 0)
+            self.assertTrue((state_cfg / "sessions" / "codegraph-nudge-s1.json").is_file())
+
+    def test_unstructured_answer_in_other_locale_is_recorded(self):
+        for label, expected in (("Indexar ahora", "index"), ("No indexar", "skip")):
+            with self.subTest(label=label), _safe_tempdir() as td:
+                tmp = Path(td)
+                project = _make_project(tmp / "home", "app")
+                state_cfg = tmp / "state-cfg"
+                _write_runtime(str(tmp / "config"), str(state_cfg))
+                ask = {
+                    "hook_event_name": "PostToolUse",
+                    "tool_name": "AskUserQuestion",
+                    "tool_input": {"questions": [
+                        {"question": f"CodeGraph: should {project} be indexed"}]},
+                    "tool_response": label,  # unstructured answer, Spanish label
+                }
+                rc, _, _ = self._hook(GATE, _make_env(tmp), ask)
+                self.assertEqual(rc, 0)
+                data = json.loads((state_cfg / "codegraph-decisions.json").read_text())
+                self.assertEqual(data["decisions"][project], expected)
+
+    def test_broken_locale_keeps_gate_and_nudge_working(self):
+        english = (PLUGIN_HOOKS.parent / "locales" / "en.json").read_text(encoding="utf-8")
+        cases = (
+            ("es", {"es.json": "{not json", "en.json": "{not json"}),
+            ("en", {}),
+            ("es", {"es.json": '{"labels": {"yes": "Indexar ahora", "no": "No indexar"}}',
+                    "en.json": english}),
+        )
+        for i, (ui, locales) in enumerate(cases):
+            with self.subTest(case=i), _safe_tempdir() as td:
+                tmp = Path(td)
+                home = tmp / "home"
+                gate_project = _make_project(home, "app")
+                nudge_project = _make_project(home, "idx")
+                (Path(nudge_project) / ".codegraph").mkdir()
+                gate_hook, nudge_hook = self._copy_plugin(tmp, locales)
+                _write_runtime(str(tmp / "config"), str(tmp / "state"), ui=ui)
+                env = _make_env(tmp)
+
+                rc, out, _ = self._hook(gate_hook, env,
+                                        self._read_payload(os.path.join(gate_project, "foo.txt")))
+                self.assertEqual(rc, 0)
+                reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn("AskUserQuestion", reason)
+                self.assertIn("Index now", reason)
+                self.assertIn(gate_project, reason)
+
+                rc, out, _ = self._hook(nudge_hook, env, self._grep_payload(nudge_project))
+                self.assertEqual(rc, 0)
+                msg = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("CodeGraph index available", msg)
 
 
 if __name__ == "__main__":

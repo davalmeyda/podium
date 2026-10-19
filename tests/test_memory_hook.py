@@ -361,5 +361,80 @@ class MemoryHookTestCase(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
 
 
+class MemoryRuntimePathsAndFallbackTests(MemoryHookTestCase):
+    """runtime.json path overrides are used; broken locales never block with an empty reason."""
+
+    def _set_paths(self, **paths):
+        rt_path = self.base / "config" / "runtime.json"
+        cfg = json.loads(rt_path.read_text())
+        cfg["paths"] = paths
+        rt_path.write_text(json.dumps(cfg))
+
+    def test_runtime_claude_dir_override_is_ignored(self):
+        _write_runtime(self.base)
+        override = self.base / "claude-override"
+        self._set_paths(claude_dir=str(override))
+        # Edits under the overridden claude dir are its own bookkeeping, not work.
+        edits = [
+            ("Write", {"file_path": f"{override}/projects/foo/{i}.md"})
+            for i in range(10)
+        ]
+        proc = self.run_hook(self._make_transcript([edits]))
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "")
+
+    def test_runtime_state_dir_override_holds_scratch(self):
+        _write_runtime(self.base)
+        state_cfg = self.base / "state-cfg"
+        self._set_paths(state_dir=str(state_cfg))
+        edits = [("Write", {"file_path": "/repo/a.py"})] * 8
+        proc = self.run_hook(self._make_transcript([edits]))
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["decision"], "block")
+        self.assertTrue((state_cfg / "sessions" / "memory-stop-s1.json").is_file())
+        self.assertFalse(self._scratch().exists())
+
+    def _run_copied_hook(self, locales):
+        """Run a copy of memory-stop.py whose plugin locales/ holds `locales`."""
+        import shutil
+        plugin = self.base / "plugin"
+        hooks = plugin / "hooks"
+        hooks.mkdir(parents=True)
+        for name in ("_runtime.py", "memory-stop.py"):
+            shutil.copy(HOOK.parent / name, hooks / name)
+        (plugin / "locales").mkdir()
+        for name, content in locales.items():
+            (plugin / "locales" / name).write_text(content, encoding="utf-8")
+        edits = [("Write", {"file_path": "/repo/a.py"})] * 8
+        tr = self._make_transcript([edits])
+        payload = {"session_id": "s1", "transcript_path": str(tr)}
+        return subprocess.run(
+            [sys.executable, str(hooks / "memory-stop.py")],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env=self.env,
+            timeout=20,
+        )
+
+    def test_unparseable_locale_still_blocks_with_english_reason(self):
+        _write_runtime(self.base, ui="es")
+        proc = self._run_copied_hook({"es.json": "{not json"})
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["decision"], "block")
+        self.assertTrue(out["reason"].strip())
+        self.assertIn("Nothing to record in memory", out["reason"])
+
+    def test_placeholder_error_in_locale_falls_back_to_english_reason(self):
+        _write_runtime(self.base, ui="es")
+        proc = self._run_copied_hook(
+            {"es.json": json.dumps({"stop": {"reason": "Revisar {nope}"}})})
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Nothing to record in memory", out["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

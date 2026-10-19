@@ -432,7 +432,7 @@ class InstallTest(coretest.CoreCase):
         self.add_fake_claude()
         code, out, err = self.install()
         self.assertEqual(code, 0, out + err)
-        calls = self.claude_calls()
+        calls = [c for c in self.claude_calls() if not c.startswith("mcp ")]
         self.assertEqual(calls[0], "plugin marketplace add %s" % coretest.FIXTURE_HOME)
         self.assertEqual(calls[1:], ["plugin install %s@podium --scope user" % name for name in
                                      ("podium-codegraph", "podium-memory", "podium-usage", "podium-upgrade")])
@@ -441,8 +441,13 @@ class InstallTest(coretest.CoreCase):
         self.add_fake_claude()
         self.write_config(coretest.BASE_CONFIG + "\n[modules]\nusage = false\nupgrade = false\n")
         self.assertEqual(self.install()[0], 0)
-        self.assertEqual([c.split()[2] for c in self.claude_calls()[1:]], ["podium-codegraph@podium",
-                                                                           "podium-memory@podium"])
+        plugin_calls = [c for c in self.claude_calls() if not c.startswith("mcp ")]
+        installs = [c for c in plugin_calls[1:] if c.startswith("plugin install")]
+        self.assertEqual([c.split()[2] for c in installs], ["podium-codegraph@podium", "podium-memory@podium"])
+        # disabled modules get their plugin uninstalled (tolerated when not installed)
+        self.assertEqual([c for c in plugin_calls[1:] if c.startswith("plugin uninstall")],
+                         ["plugin uninstall podium-usage@podium --scope user",
+                          "plugin uninstall podium-upgrade@podium --scope user"])
 
     def test_missing_claude_warns_and_skips(self):
         code, out, err = self.install()
@@ -463,7 +468,7 @@ class InstallTest(coretest.CoreCase):
         code, out, err = self.install(FAKE_CLAUDE_FAIL="podium-usage")
         self.assertEqual(code, 0, out + err)
         self.assertIn("warning", out)
-        self.assertEqual(len(self.claude_calls()), 5)
+        self.assertEqual(len([c for c in self.claude_calls() if not c.startswith("mcp ")]), 5)
 
     # -- modules
     def test_modules_flag_restricts_the_actions(self):

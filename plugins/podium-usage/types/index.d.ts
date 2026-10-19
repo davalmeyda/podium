@@ -53,6 +53,7 @@ export type Locale = {
   no_variant: string
   compaction_suffix: string
   short_today: string
+  reader_error: string
   weekdays: readonly string[]
 }
 

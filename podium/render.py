@@ -84,6 +84,14 @@ def _lookup(config: Mapping[str, Any], dotted: str) -> Any:
     return node
 
 
+def _has_opencode_executors(config: Mapping[str, Any]) -> bool:
+    return any((row.get("launch") or {}).get("kind") == "opencode" for row in config.get("roster") or [])
+
+
+# `requires = "<name>"` on a manifest fragment: rendered only when the predicate holds.
+_REQUIREMENTS = {"opencode-executors": _has_opencode_executors}
+
+
 class _Generated:
     """Lazy `roster.generated(config)` so templates without it never import roster."""
 
@@ -182,6 +190,11 @@ def render_target(
         if module is not None and module not in config_mod.MODULES:
             raise RenderError("fragment %s: unknown module: %s" % (frag["id"], module))
         enabled = True if module is None else bool(modules.get(module, False))
+        requires = frag.get("requires")
+        if requires is not None:
+            if requires not in _REQUIREMENTS:
+                raise RenderError("fragment %s: unknown requirement: %s" % (frag["id"], requires))
+            enabled = enabled and _REQUIREMENTS[requires](config)
         entries.append({"id": frag["id"], "enabled": enabled, "text": None})
         known.add(frag["id"])
 
@@ -243,7 +256,8 @@ def render_target(
             if not frag_path.is_file():
                 raise RenderError("fragment not found: %s" % frag_path)
             text = _read_text(frag_path)
-        text = render_text(text, config, generated).strip("\n")
+        # An empty generated block must not leave a run of blank lines behind.
+        text = re.sub(r"\n{3,}", "\n\n", render_text(text, config, generated)).strip("\n")
         if text:
             chunks.append(text)
     return "\n\n".join(chunks) + "\n"

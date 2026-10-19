@@ -396,9 +396,11 @@ def _validate(out_path: Path) -> None:
         from podium.config import load  # type: ignore[import-not-found]
     except (ImportError, AttributeError):
         return
-    # Use a fresh env so we don't depend on PODIUM_* vars during a smoke test.
+    # ${VAR} references are expanded at install time, not now: give each one a
+    # placeholder so validation never depends on the caller's environment.
+    names = re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", out_path.read_text(encoding="utf-8"))
     try:
-        load(out_path.parent, env={})
+        load(out_path.parent, env={name: "http://podium-init.invalid" for name in names})
     except Exception as exc:  # surface the validation failure to the caller
         raise InitError(f"generated podium.toml failed validation: {exc}") from exc
 

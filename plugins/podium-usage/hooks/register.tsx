@@ -41,7 +41,9 @@ async function refresh($: EngineInterface) {
       parsedRuntime = data.runtime ?? null
       parsedLocale = data.locale ?? null
     } catch {
-      errors.push(`reader: ${ran.stderr.trim().slice(0, 200) || `exit ${ran.exitCode}`}`)
+      const loc = (await read($, locale)) as Locale | null
+      const prefix = loc?.reader_error ?? 'reader: '
+      errors.push(`${prefix}${ran.stderr.trim().slice(0, 200) || `exit ${ran.exitCode}`}`)
     }
     const compactions = ((await $.store.get(compactKey(sessionId))) ?? []) as Compaction[]
     const usage = await $.session.usage()
@@ -88,12 +90,15 @@ async function refresh($: EngineInterface) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // Load the locale (and runtime) BEFORE registering the command so its
+    // description follows the configured UI language. refresh() stores the
+    // locale into the atom; we await it once here so `read` returns it below.
+    await refresh($)
     const loc = (await read($, locale)) as Locale | null
     await $.command.register({
       name: 'tokens',
       description: loc?.command_description ?? 'Show the tokens consumed in this session, per model.',
     })
-    void refresh($)
     $.clock.every(REFRESH_MS, () => void refresh($))
 
     return next(e)
@@ -216,6 +221,7 @@ function fallbackLocale(): Locale {
     no_variant: 'no variant',
     compaction_suffix: 'compaction ×',
     short_today: 'today ',
+    reader_error: 'reader: ',
     weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   }
 }

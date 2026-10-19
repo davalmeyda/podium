@@ -98,8 +98,8 @@ launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", v
 [[roster]]
 id = "minimax-thinking"
 engine = "MiniMax fast / thinking"
-model = "MiniMax-M3 #thinking"
-responsibility = "Code or reading with context > 100K"
+model = "MiniMax-M3 #none / #thinking"
+responsibility = "Code (#none) or reading (#thinking) with context > 100K (whole modules, huge logs)"
 fallback = "haiku"
 launch = { kind = "opencode", agent = "minimax", model = "minimax/MiniMax-M3", variant = "thinking" }
 
@@ -174,7 +174,7 @@ deny_mcp = ["chrome-devtools_*"]
 name = "sol"
 role = "consultant"
 model = "openai/gpt-6.1-sol"
-description = "GPT-6.1 Sol consultant — diagnosis, review with judgement, second opinion, and architecture verdict."
+description = "GPT-6.1 Sol consultant — diagnosis, review with judgement, second opinion, and architecture verdict. READ-ONLY."
 deny_mcp = ["chrome-devtools_*"]
 
 [[agents]]

@@ -44,11 +44,13 @@ export function fmt(n: number): string {
   return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 2 : 1)}M`
 }
 
-/** Short label: no provider prefix, no leading `claude-`, includes the OpenCode variant. */
+/** Short label: no provider prefix, no leading `claude-`, includes the OpenCode
+ * variant and, for Claude rows, the effort bucket from the transcript. */
 export function label(row: UsageRow, locale: Pick<Locale, 'no_variant' | 'compaction_suffix'>): string {
   const model = row.model.replace(/^[^/]+\//, '').replace(/^claude-/, '')
   if (row.engine === 'compact') return `${model} ${locale.compaction_suffix}${row.n}`
-  return row.engine === 'opencode' ? `${model} #${row.variant || locale.no_variant}` : model
+  if (row.engine === 'opencode') return `${model} #${row.variant || locale.no_variant}`
+  return row.variant ? `${model} #${row.variant}` : model
 }
 
 /** New tokens that hit the model: fresh + cache-written (cache re-read does not count). */
@@ -61,14 +63,16 @@ export function totals(rows: readonly UsageRow[]): { inputTokens: number; output
   )
 }
 
-// Relevance order from the orchestrator's table; anything missing falls to the end.
-// Built at call time from the configured `model_order` (regex fragments).
+// Variant order: anything not in this list falls to the end. Used after the
+// configured `model_order` regexes have matched (or not matched) a row.
 const VARIANT_ORDER = ['xhigh', 'high', 'medium', 'thinking', 'low', 'none', '']
 
 const rank = (list: readonly unknown[], i: number) => (i === -1 ? list.length : i)
 
-/** Compile the configured fragments into case-insensitive regexes, falling back to the default. */
-export function buildModelOrder(fragments: readonly string[]): readonly RegExp[] {
+/** Compile the configured fragments into case-insensitive regexes. Returns
+ * `null` when no usable fragment is provided so the caller can fall back to
+ * the neutral "order by total tokens descending" behaviour. */
+export function buildModelOrder(fragments: readonly string[]): readonly RegExp[] | null {
   const out: RegExp[] = []
   for (const f of fragments) {
     try {
@@ -77,17 +81,30 @@ export function buildModelOrder(fragments: readonly string[]): readonly RegExp[]
       // Skip invalid fragments instead of breaking the whole ordering.
     }
   }
-  return out.length > 0 ? out : DEFAULT_MODEL_ORDER
+  return out.length > 0 ? out : null
 }
 
-// Reasonable fallback if runtime.json is missing or unusable.
-const DEFAULT_MODEL_ORDER: readonly RegExp[] = [
-  /opus/i, /sonnet/i, /haiku/i, /gpt-6\.1-sol/i, /gpt-6-luna/i, /gpt/i, /minimax/i,
-]
+// `inputTokens` is a function on this file already; reuse it for the neutral
+// fallback so callers sort by "tokens that actually hit the model".
+const totalTokens = (r: UsageRow): number => inputTokens(r) + r.out
 
-/** By model relevance, then variant relevance; compactions go last. */
+/** By model relevance, then variant relevance; compactions go last. When no
+ * configured fragments are usable (runtime.json missing or `usage.model_order`
+ * empty/unparseable), rows are ordered by total tokens descending — a neutral
+ * fallback that carries no personal roster names. */
 export function byRelevance(rows: readonly UsageRow[], fragments: readonly string[]): UsageRow[] {
   const order = buildModelOrder(fragments)
+  if (order === null) {
+    const compacts: UsageRow[] = []
+    const rest: UsageRow[] = []
+    for (const r of rows) (r.engine === 'compact' ? compacts : rest).push(r)
+    rest.sort((a, b) =>
+      totalTokens(b) - totalTokens(a) ||
+      a.model.localeCompare(b.model) ||
+      a.variant.localeCompare(b.variant),
+    )
+    return [...rest, ...compacts]
+  }
   const model = (r: UsageRow) => rank(order, order.findIndex(re => re.test(r.model)))
   const variant = (r: UsageRow) => rank(VARIANT_ORDER, VARIANT_ORDER.indexOf(r.variant))
   return [...rows].sort(

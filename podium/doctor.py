@@ -331,14 +331,27 @@ def _check_hooks_log(state_dir: Path) -> None:
 
 
 def _parse_iso(line: str) -> datetime | None:
-    """Parse ``2026-04-30T12:34:56Z`` style hook log timestamps."""
+    """Parse hook log timestamps into an aware ``datetime`` in UTC.
+
+    Hooks write either a ``Z``-suffixed UTC stamp (``2026-04-30T12:34:56Z``)
+    or, per the legacy/runtime convention, a naive local stamp
+    (``2026-04-30T12:34:56``). Returned values are always aware (UTC) so the
+    recent-activity cutoff comparison never raises ``TypeError``; lines that
+    cannot be parsed at all are skipped.
+    """
     head = line.split(" ", 1)[0]
     try:
         if head.endswith("Z"):
-            return datetime.fromisoformat(head[:-1]).replace(tzinfo=timezone.utc)
-        return datetime.fromisoformat(head)
+            dt = datetime.fromisoformat(head[:-1])
+            return dt.replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(head)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        # Naive stamp: hooks that don't carry a TZ (e.g. ``time.strftime`` in
+        # ``plugins/podium-codegraph/hooks/_runtime.py``) write local time.
+        dt = dt.astimezone()  # attach the system local timezone
+    return dt.astimezone(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
