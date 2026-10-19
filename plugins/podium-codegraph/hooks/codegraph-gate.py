@@ -123,6 +123,21 @@ def is_worktree(root):
         return False
 
 
+def worktree_main(root):
+    """Main checkout of the git worktree at `root` (the folder holding the
+    `.git/worktrees/<name>` its pointer names), or None."""
+    try:
+        with open(os.path.join(root, ".git"), "r", encoding="utf-8") as f:
+            pointer = f.read().strip()
+    except OSError:
+        return None
+    gitdir = pointer[len("gitdir:"):].strip() if pointer.startswith("gitdir:") else ""
+    marker = os.sep + ".git" + os.sep + "worktrees" + os.sep
+    if marker not in gitdir:
+        return None
+    return gitdir.split(marker, 1)[0] or None
+
+
 def indexed(path, roots, home):
     """True if `path` has a .codegraph ancestor (or itself) inside HOME, which
     is exclusive, or inside a configured root, which is inclusive."""
@@ -291,6 +306,9 @@ def gate(data, paths, runtime, locale, yes, no):
         if decision == "skip":
             continue
         if runtime.get("codegraph", {}).get("worktrees", False) and is_worktree(root):
+            # a worktree inherits the user's "do not index" for its main checkout
+            if state["decisions"].get(worktree_main(root)) == "skip":
+                continue
             reason = locale["gate"]["deny_worktree"].format(root=root)
         elif decision == "index":
             reason = locale["gate"]["deny_index_pending"].format(root=root)

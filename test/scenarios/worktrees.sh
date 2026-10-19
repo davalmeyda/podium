@@ -84,7 +84,7 @@ HEAD0=$(g rev-parse HEAD); STATUS0=$(g status --porcelain)
 WT=$HOME/work/app-wt/feat
 podium worktree create "$APP" feat .env >/tmp/create.log 2>&1
 check "create exit 0" "grep -q '^worktree: $WT' /tmp/create.log"
-check "create says codegraph init is next" "grep -q 'next: codegraph init $WT' /tmp/create.log"
+check "no codegraph hint while main is not indexed" "! grep -q 'codegraph init' /tmp/create.log"
 check "worktree folder is the sibling ../app-wt/feat" "test -d $WT/src"
 check "worktree carries main's uncommitted change" "grep -q main-uncommitted $WT/src/a.js"
 check "worktree got the untracked .env copy" "grep -q SECRET=1 $WT/.env"
@@ -149,10 +149,18 @@ g checkout -q -- . && rm -f "$APP/src/e.js" "$APP/src/e.js.worktree" "$APP/src/d
 printf '{"name":"WT_MARKER_QQ"}\n' > "$APP/package.json"
 g -c user.name=t -c user.email=t@t commit -qam marker
 WT3=$HOME/work/app-wt/gate
-podium worktree create "$APP" gate >/dev/null 2>&1
+(cd "$APP" && codegraph init . >/dev/null 2>&1) || true
+podium worktree create "$APP" gate >/tmp/create3.log 2>&1
+check "codegraph hint once main is indexed" "grep -q 'next: codegraph init $WT3' /tmp/create3.log"
 check "hook denies the worktree with the worktree text" "gate_read $WT3/package.json | grep -q 'is a git worktree'"
 check "hook does not ask the user about the worktree" "! gate_read $WT3/package.json | grep -q 'has not decided'"
-check "hook still asks about the unindexed main repo" "gate_read $APP/package.json | grep -q 'has not decided'"
+check "hook allows the indexed main repo" "test -z \"\$(gate_read $APP/package.json)\""
+python3 - "$STATE_DIR/codegraph-decisions.json" "$APP" <<'PY'
+import json, sys
+json.dump({"decisions": {sys.argv[2]: "skip"}}, open(sys.argv[1], "w"))
+PY
+check "user declined indexing main: the worktree inherits it" "test -z \"\$(gate_read $WT3/package.json)\""
+printf '{"decisions": {}}' > "$STATE_DIR/codegraph-decisions.json"
 run_claude "$WT3" "Read package.json and tell me the name field." /tmp/g1.json
 check "claude: Read in the worktree is denied with the worktree text" "flatten /tmp/g1.json | grep -q 'is a git worktree'"
 echo "--- transcript (first 1500 chars) ---"; flatten /tmp/g1.json | head -c 1500; echo; echo "--- end ---"

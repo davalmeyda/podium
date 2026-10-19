@@ -165,7 +165,7 @@ class WorktreeTest(unittest.TestCase):
         # Main is untouched.
         self.assertEqual(self.head(), head_before)
         self.assertEqual(self.porcelain(), status_before)
-        self.assertIn("next: codegraph init", out)
+        self.assertNotIn("codegraph init", out)  # main is not indexed in this fixture
 
         # Stored base file sits in the git common dir.
         common_rel = _git(self.env, "rev-parse", "--git-common-dir", cwd=self.repo)[1].strip()
@@ -325,6 +325,307 @@ class WorktreeTest(unittest.TestCase):
         self.assertTrue((wt / "node_modules").is_symlink())
         self.assertEqual(os.readlink(str(wt / "node_modules")),
                          str(self.repo / "node_modules"))
+
+    # -- tests edge cases ----------------------------------------------------
+
+    def test_g_deleted_in_worktree_changed_in_main_conflicts(self):
+        # Worktree deletes b.txt while main has uncommitted edits to b.txt.
+        # `git stash create` snapshots the edit so the base = edited b.txt;
+        # main's later edit is the "changed" side and the worktree drops the
+        # file, hence the deleted/changed conflict.
+        code, _out, err = self.call_script("create", "gamma1")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma1")
+        # Main edits b.txt AFTER create so the edit does not end up in the base.
+        (self.repo / "b.txt").write_text("b-main-changed\n", encoding="utf-8")
+        head_before = self.head()
+        (wt / "b.txt").unlink()
+
+        code, out, err = self.call_script("integrate", "gamma1")
+        self.assertEqual(code, 2, err)
+        self.assertIn("CONFLICT (deleted in worktree, changed in main): b.txt", out)
+        # main's b.txt is kept with main's content.
+        self.assertTrue((self.repo / "b.txt").exists())
+        self.assertEqual((self.repo / "b.txt").read_text(encoding="utf-8"),
+                         "b-main-changed\n")
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g2_deleted_in_worktree_untouched_in_main(self):
+        # Worktree deletes b.txt; main has not touched it. The merge removes
+        # the file from main and prints `deleted: b.txt`.
+        code, _out, err = self.call_script("create", "gamma2")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma2")
+        head_before = self.head()
+        (wt / "b.txt").unlink()
+
+        code, out, err = self.call_script("integrate", "gamma2")
+        self.assertEqual(code, 0, err)
+        self.assertIn("deleted: b.txt", out)
+        self.assertFalse((self.repo / "b.txt").exists())
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g3_changed_in_worktree_deleted_in_main_conflicts(self):
+        # Worktree edits c.txt; main deletes c.txt AFTER create. The script
+        # places the worktree's content next to main as `c.txt.worktree` and
+        # reports a deleted/changed conflict from the worktree's perspective.
+        code, _out, err = self.call_script("create", "gamma3")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma3")
+        (wt / "c.txt").write_text("c-wt-edited\n", encoding="utf-8")
+        head_before = self.head()
+        (self.repo / "c.txt").unlink()
+
+        code, out, err = self.call_script("integrate", "gamma3")
+        self.assertEqual(code, 2, err)
+        self.assertIn("CONFLICT (changed in worktree, deleted in main): c.txt", out)
+        # c.txt is absent in main, the worktree copy sits next to the path.
+        self.assertFalse((self.repo / "c.txt").exists())
+        self.assertTrue((self.repo / "c.txt.worktree").exists())
+        self.assertEqual((self.repo / "c.txt.worktree").read_text(encoding="utf-8"),
+                         "c-wt-edited\n")
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g4_rename_in_worktree_with_main_edit_conflicts(self):
+        # Worktree deletes a.txt and creates a2.txt with the same content
+        # (a git-style rename). Main edits a.txt AFTER create. With
+        # `--no-renames` git reports a delete of a.txt and an add of a2.txt;
+        # main's edit makes a.txt a deleted/changed conflict.
+        code, _out, err = self.call_script("create", "gamma4")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma4")
+        (self.repo / "a.txt").write_text("region1\nmain-edit\nshared\n",
+                                        encoding="utf-8")
+        head_before = self.head()
+        # Git-style rename: drop a.txt, add a2.txt with the same content.
+        (wt / "a.txt").unlink()
+        (wt / "a2.txt").write_text("region1\nmain\nshared\n",
+                                   encoding="utf-8")
+
+        code, out, err = self.call_script("integrate", "gamma4")
+        self.assertEqual(code, 2, err)
+        self.assertIn("CONFLICT (deleted in worktree, changed in main): a.txt", out)
+        self.assertIn("new: a2.txt", out)
+        # Main keeps its edit on a.txt; a2.txt materialises from the worktree.
+        self.assertTrue((self.repo / "a.txt").exists())
+        self.assertEqual((self.repo / "a.txt").read_text(encoding="utf-8"),
+                         "region1\nmain-edit\nshared\n")
+        self.assertTrue((self.repo / "a2.txt").exists())
+        self.assertEqual((self.repo / "a2.txt").read_text(encoding="utf-8"),
+                         "region1\nmain\nshared\n")
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g5_binary_one_sided_change(self):
+        # Commit a binary file with NUL bytes only for this test; main stays
+        # untouched, the worktree replaces the bytes. `matches_base` is true on
+        # the main side, so the merge copies the worktree bytes into main.
+        bin_bytes = b"\x00bin\x00side\x00v1\n"
+        alt_bytes = b"\x00bin\x00side\x00v2\n"
+        (self.repo / "bin.dat").write_bytes(bin_bytes)
+        _git(self.env, "add", "bin.dat", cwd=self.repo)
+        _git(self.env, "commit", "-qm", "add binary", cwd=self.repo)
+
+        code, _out, err = self.call_script("create", "gamma5")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma5")
+        (wt / "bin.dat").write_bytes(alt_bytes)
+        head_before = self.head()
+
+        code, out, err = self.call_script("integrate", "gamma5")
+        self.assertEqual(code, 0, err)
+        self.assertIn("merged: bin.dat", out)
+        self.assertEqual((self.repo / "bin.dat").read_bytes(), alt_bytes)
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g6_tracked_symlink_repointed_in_worktree(self):
+        # Tracked symlink `link` points at a.txt; the worktree repoints it at
+        # b.txt while main is untouched. The integrate must rewrite the
+        # symlink in main without touching a.txt through the link.
+        (self.repo / "link").symlink_to("a.txt")
+        _git(self.env, "add", "link", cwd=self.repo)
+        _git(self.env, "commit", "-qm", "add symlink", cwd=self.repo)
+        a_before = (self.repo / "a.txt").read_text(encoding="utf-8")
+
+        code, _out, err = self.call_script("create", "gamma6")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma6")
+        # Repoint the symlink in the worktree (unlink first, then symlink).
+        (wt / "link").unlink()
+        (wt / "link").symlink_to("b.txt")
+        head_before = self.head()
+
+        code, out, err = self.call_script("integrate", "gamma6")
+        self.assertEqual(code, 0, err)
+        self.assertIn("merged: link", out)
+        # main's link is a symlink to b.txt (not a regular file) and a.txt is
+        # untouched -- the merge must not have written through the link.
+        self.assertTrue((self.repo / "link").is_symlink())
+        self.assertEqual(os.readlink(str(self.repo / "link")), "b.txt")
+        self.assertEqual((self.repo / "a.txt").read_text(encoding="utf-8"),
+                         a_before)
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g7_executable_bit_only_change_is_carried(self):
+        # Worktree toggles only the executable bit on c.txt; the integrate
+        # should propagate that mode change to main without a content diff.
+        code, _out, err = self.call_script("create", "gamma7")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma7")
+        wt_c = wt / "c.txt"
+        wt_c.chmod(0o755)
+        head_before = self.head()
+
+        code, out, err = self.call_script("integrate", "gamma7")
+        self.assertEqual(code, 0, err)
+        c_mode = (self.repo / "c.txt").stat().st_mode
+        self.assertTrue(c_mode & 0o111, "main's c.txt must be executable")
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g8_paths_with_spaces_and_tab(self):
+        # Names with spaces and an embedded TAB character round-trip through
+        # the integrate's NUL-delimited raw output and both files land in main.
+        space_name = "my file.txt"
+        tab_name = "tab\tname.txt"
+        (self.repo / space_name).write_text("space-original\n", encoding="utf-8")
+        (self.repo / tab_name).write_text("tab-original\n", encoding="utf-8")
+        _git(self.env, "add", space_name, tab_name, cwd=self.repo)
+        _git(self.env, "commit", "-qm", "add names with space and tab",
+             cwd=self.repo)
+
+        code, _out, err = self.call_script("create", "gamma8")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma8")
+        head_before = self.head()
+        (wt / space_name).write_text("space-wt\n", encoding="utf-8")
+        (wt / tab_name).write_text("tab-wt\n", encoding="utf-8")
+
+        code, out, err = self.call_script("integrate", "gamma8")
+        self.assertEqual(code, 0, err)
+        self.assertIn("merged: %s" % space_name, out)
+        self.assertIn("merged: %s" % tab_name, out)
+        self.assertEqual((self.repo / space_name).read_text(encoding="utf-8"),
+                         "space-wt\n")
+        self.assertEqual((self.repo / tab_name).read_text(encoding="utf-8"),
+                         "tab-wt\n")
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g9_create_rejects_invalid_task_names(self):
+        # `feature/x` carries a slash and `../x` starts with a dot; both must
+        # be rejected with exit 1, the canonical message, and no side effects.
+        for bad in ("feature/x", "../x"):
+            head_before = self.head()
+            code, out, err = self.call_script("create", bad)
+            self.assertEqual(code, 1, "%s: %s" % (bad, err))
+            self.assertIn("task must be a simple name", err)
+            # no folder for that name; the sibling `-wt` dir does not exist.
+            wt_candidate = self.repo.parent / ("%s-wt" % self.repo.name) / bad
+            self.assertFalse(wt_candidate.exists(),
+                             "%s must not have created a folder" % bad)
+            # no branch with that name.
+            _, branches = _git(self.env, "branch", "--list", cwd=self.repo)
+            self.assertNotIn("wt/%s" % bad, branches.split())
+            self.assertEqual(self.head(), head_before)
+            _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+            self.assertEqual(diff, "")
+
+    def test_g10_nested_link_in_link_list(self):
+        # `pkg/a/node_modules` is in the link list next to `node_modules`;
+        # create links both as symlinks, clean leaves both main folders as
+        # real directories with their original content.
+        nested = self.repo / "pkg" / "a" / "node_modules"
+        nested.mkdir(parents=True)
+        (nested / "pkg").write_text("nested-data\n", encoding="utf-8")
+        # Both folders are ignored so the integrate never tries to stage them
+        # through the (broken) explicit-pathspec path.
+        (self.repo / ".gitignore").write_text("node_modules\n.env\n",
+                                              encoding="utf-8")
+        _git(self.env, "add", ".gitignore", cwd=self.repo)
+        _git(self.env, "commit", "-qm", "ignore node_modules without slash",
+             cwd=self.repo)
+        self.env["PODIUM_WORKTREE_LINKS"] = "node_modules pkg/a/node_modules"
+
+        code, _out, err = self.call_script("create", "gamma10")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma10")
+        self.assertTrue((wt / "node_modules").is_symlink())
+        self.assertEqual(os.readlink(str(wt / "node_modules")),
+                         str(self.repo / "node_modules"))
+        nested_link = wt / "pkg" / "a" / "node_modules"
+        self.assertTrue(nested_link.is_symlink())
+        self.assertEqual(os.readlink(str(nested_link)), str(nested))
+
+        code, out, err = self.call_script("clean", "gamma10")
+        self.assertEqual(code, 0, err)
+        self.assertIn("leftovers: worktrees=0 branches=0 folder=no", out)
+        # main's two folders are real dirs again and keep their content.
+        self.assertTrue((self.repo / "node_modules").is_dir())
+        self.assertFalse((self.repo / "node_modules").is_symlink())
+        self.assertEqual((self.repo / "node_modules" / "pkg").read_text(
+            encoding="utf-8"), "data\n")
+        self.assertTrue(nested.is_dir())
+        self.assertFalse(nested.is_symlink())
+        self.assertEqual((nested / "pkg").read_text(encoding="utf-8"),
+                         "nested-data\n")
+
+    def test_g11_integrate_output_omits_node_modules(self):
+        # node_modules is gitignored, so the integrate's diff never lists it
+        # even though both worktrees point at the same real folder through a
+        # symlink.
+        head_before = self.head()
+        code, _out, err = self.call_script("create", "gamma11a")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma11a")
+        (wt / "d.txt").write_text("d\n", encoding="utf-8")
+        code, out, err = self.call_script("integrate", "gamma11a")
+        self.assertEqual(code, 0, err)
+        self.assertIn("new: d.txt", out)
+        self.assertNotIn("node_modules", out)
+        self.assertEqual(self.head(), head_before)
+        _, diff = _git(self.env, "diff", "--cached", cwd=self.repo)
+        self.assertEqual(diff, "")
+
+    def test_g11b_create_hints_codegraph_only_when_index_present(self):
+        # Sub-case A: no .codegraph in main -> no `next:` hint.
+        code, out_a, err = self.call_script("create", "gamma11b")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("next: codegraph init", out_a)
+        # Sub-case B: .codegraph in main -> the hint appears with the worktree
+        # path so the executor can index it before working there.
+        (self.repo / ".codegraph").mkdir()
+        code, out_b, err = self.call_script("create", "gamma11c")
+        self.assertEqual(code, 0, err)
+        self.assertIn("next: codegraph init", out_b)
+
+    def test_g12_clean_removes_a_locked_worktree(self):
+        # `git worktree lock` would normally block `worktree remove`; the
+        # script passes `--force --force` so even a locked worktree disappears
+        # and the leftovers line is all zero.
+        code, _out, err = self.call_script("create", "gamma12")
+        self.assertEqual(code, 0, err)
+        wt = self.wt_path("gamma12")
+        code, out = _git(self.env, "worktree", "lock", str(wt), cwd=self.repo)
+        self.assertEqual(code, 0, out)
+
+        code, out, err = self.call_script("clean", "gamma12")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(wt.exists())
+        self.assertIn("leftovers: worktrees=0 branches=0 folder=no", out)
 
 
 if __name__ == "__main__":

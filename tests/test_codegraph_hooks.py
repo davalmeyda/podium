@@ -3,6 +3,7 @@
 Runs the gate and nudge hooks as subprocesses with JSON stdin under temp
 HOME / PODIUM_CONFIG_DIR / PODIUM_STATE_DIR.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -1024,6 +1025,137 @@ class WorktreeGateTests(unittest.TestCase):
             self.assertIn(worktree, reason)
             self.assertNotIn("git worktree", reason)
             self.assertNotIn("AskUserQuestion", reason)
+
+    def test_worktree_main_skip_is_inherited_by_worktree(self):
+        """When the user recorded `skip` for the MAIN checkout of a git worktree,
+        every Read inside the worktree must be allowed (hook emits no output).
+        `worktrees=true` in runtime.json so the gate takes the worktree branch.
+        """
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            home = tmp / "home"
+            # The "main" checkout: a real directory with a manifest, sitting next
+            # to the worktree so `_project_root` and `_ignored_set` behave the
+            # same as for a normal project.
+            main = home / "repo"
+            main.mkdir(parents=True, exist_ok=True)
+            (main / "package.json").write_text('{"name": "x"}')
+            # The worktree points its `.git` to `<main>/.git/worktrees/t1` and
+            # also carries a manifest so `project_root` stops here instead of
+            # walking into the main checkout.
+            wt_gitdir = str(main) + "/.git/worktrees/t1"
+            wt = home / "wt1"
+            wt.mkdir(parents=True, exist_ok=True)
+            (wt / "package.json").write_text('{"name": "x"}')
+            (wt / ".git").write_text(f"gitdir: {wt_gitdir}\n")
+            worktree = str(wt)
+            _write_runtime(str(cfg_dir), state_dir, worktrees=True)
+            # Record `skip` for the MAIN checkout path the pointer names.
+            os.makedirs(state_dir, exist_ok=True)
+            with open(os.path.join(state_dir, "codegraph-decisions.json"), "w", encoding="utf-8") as f:
+                json.dump({"decisions": {str(main): "skip"}}, f)
+            env = _make_env(tmp)
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Read",
+                "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                "cwd": worktree,
+            }
+            env["__STDIN__"] = json.dumps(payload)
+            rc, out, _ = _run_hook(GATE, env)
+            self.assertEqual(rc, 0)
+            # Allow path: no `hookSpecificOutput`, no stderr noise.
+            self.assertEqual(out.strip(), "")
+
+    def test_worktree_main_index_or_absent_uses_worktree_deny(self):
+        """When the user chose `index` (or never answered) for the MAIN checkout
+        of a git worktree, the gate must deny with the `deny_worktree` text —
+        never the normal ask: a worktree is never queried. `worktrees=true`.
+        """
+        with _safe_tempdir() as td:
+            tmp = Path(td)
+            cfg_dir = tmp / "config"
+            state_dir = str(tmp / "state")
+            home = tmp / "home"
+            main = home / "repo"
+            main.mkdir(parents=True, exist_ok=True)
+            (main / "package.json").write_text('{"name": "x"}')
+            wt_gitdir = str(main) + "/.git/worktrees/t1"
+            wt = home / "wt1"
+            wt.mkdir(parents=True, exist_ok=True)
+            (wt / "package.json").write_text('{"name": "x"}')
+            (wt / ".git").write_text(f"gitdir: {wt_gitdir}\n")
+            worktree = str(wt)
+            _write_runtime(str(cfg_dir), state_dir, worktrees=True)
+            # Same decision value in two flavours: explicit `index` and absent.
+            for decision in ({"decisions": {str(main): "index"}}, {"decisions": {}}):
+                os.makedirs(state_dir, exist_ok=True)
+                with open(os.path.join(state_dir, "codegraph-decisions.json"), "w", encoding="utf-8") as f:
+                    json.dump(decision, f)
+                env = _make_env(tmp)
+                payload = {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": os.path.join(worktree, "foo.txt")},
+                    "cwd": worktree,
+                }
+                env["__STDIN__"] = json.dumps(payload)
+                rc, out, _ = _run_hook(GATE, env)
+                self.assertEqual(rc, 0)
+                self.assertTrue(out.strip(), "hook emitted no JSON for worktree denial")
+                data = json.loads(out)
+                self.assertEqual(data["hookSpecificOutput"]["permissionDecision"], "deny")
+                reason = data["hookSpecificOutput"]["permissionDecisionReason"]
+                # Worktree-text tells the user to run `codegraph init` without asking.
+                self.assertIn("codegraph init", reason)
+                self.assertIn(worktree, reason)
+                # Never the normal ask text: a worktree must not be queried.
+                self.assertNotIn("AskUserQuestion", reason)
+                self.assertNotIn("Index now", reason)
+                self.assertNotIn("Do not index", reason)
+
+
+class WorktreeMainUnitTests(unittest.TestCase):
+    """Unit tests for `worktree_main` covering the three pointer shapes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.gate = WorktreeMainUnitTests._load_gate_module()
+
+    @staticmethod
+    def _load_gate_module():
+        spec = importlib.util.spec_from_file_location(
+            "codegraph_gate_unit", str(GATE))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_pointer_with_worktrees_returns_main(self):
+        with tempfile.TemporaryDirectory() as td:
+            main = os.path.join(td, "repo")
+            os.makedirs(main)
+            wt = os.path.join(td, "wt1")
+            os.makedirs(wt)
+            (Path(wt) / ".git").write_text(f"gitdir: {main}/.git/worktrees/t1\n")
+            self.assertEqual(self.gate.worktree_main(wt), main)
+
+    def test_dot_git_directory_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "x")
+            os.makedirs(p)
+            # `.git` is a directory (a non-worktree repo), not the pointer file.
+            os.makedirs(os.path.join(p, ".git"))
+            self.assertIsNone(self.gate.worktree_main(p))
+
+    def test_pointer_without_worktrees_marker_returns_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = os.path.join(td, "x")
+            os.makedirs(p)
+            # `gitdir: /x/repo/.git` — points at the main repo's `.git`, not at a worktree.
+            (Path(p) / ".git").write_text("gitdir: /x/repo/.git\n")
+            self.assertIsNone(self.gate.worktree_main(p))
 
 
 if __name__ == "__main__":

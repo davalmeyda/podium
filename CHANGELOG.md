@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Opt-in `worktrees` module, asked by `podium init` and by the agent-guided install: rules that let the principal move a large or structural change to a git worktree and merge it back itself, and `podium worktree create|integrate|clean` (no commits, main checkout's branch and index untouched, dependency folders symlinked, nothing left after `clean`). With it on, the CodeGraph gate never asks about a worktree and blocks it until indexed.
+- Opt-in `worktrees` module, asked by `podium init` and by the agent-guided install: rules that let the principal move a large or structural change to a git worktree and merge it back itself, and `podium worktree create|integrate|clean` (no commits, main checkout's branch and index untouched, dependency folders symlinked, nothing left after `clean`). With it on, the CodeGraph gate never asks about a worktree and blocks it until indexed, unless the user declined indexing for its main checkout.
 
 ### Changed
 - `contract-parallelism` rule split into `contract-parallelism`, `contract-isolation` (rendered without worktrees) and `contract-invariants`; overlays that replaced the old fragment must move the isolation and invariants text to the new ids.

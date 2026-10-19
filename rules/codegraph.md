@@ -9,7 +9,7 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 
 **Multi-project folders.** This rule overrides the "skip CodeGraph entirely" line above when the current folder is a parent of several projects:
 
-- If the current folder has no `.codegraph/`, look for indexed sub-projects before skipping: `find . -maxdepth 3 -type d -name .codegraph -not -path '*/node_modules/*'`. Skip CodeGraph only if none is found.
+- If the current folder has no `.codegraph/`, look for indexed sub-projects before skipping: `find . -maxdepth 3 -type d -name .codegraph -not -path '*/node_modules/*' -not -path '*-wt/*'`. Skip CodeGraph only if none is found.
 - Query each sub-project by passing its root as `projectPath` to `codegraph_explore` (shell: `codegraph explore -p <root> "<query>"`). For a question that spans several projects, query each one and combine the answers.
 - The MCP tool catches the index up on first access to a project and keeps watching it for the rest of the session, so no manual `codegraph sync` is needed before querying through the MCP.
 - Never run `codegraph init` or `codegraph index` on a parent folder or the home folder.

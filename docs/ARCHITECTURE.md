@@ -371,8 +371,11 @@ like `install.sh`, then run the new checkout's `podium install`.
 `PODIUM_WORKTREE_LINKS` (from `[worktrees] link`): `create` makes `../<repo>-wt/<task>` on
 branch `wt/<task>` from `git stash create` (or `HEAD`), copies the listed untracked files and
 symlinks the link folders; `integrate` three-way merges every changed, new or deleted file onto
-the main checkout's working tree (exit 2 on conflicts, markers `<<<<<<< main` / `>>>>>>> worktree`,
-`<file>.worktree` for files created on both sides); `clean` removes the worktree, branch, stored
+the main checkout's working tree (exit 2 on conflicts: markers `<<<<<<< main` / `>>>>>>> worktree`
+for text, a `<file>.worktree` copy for files created on both sides, changed in the worktree but
+deleted in main, binaries or symlinks changed on both sides; a file deleted in the worktree but
+changed in main is kept; submodule changes are reported, never merged; executable-bit changes
+carry over); `clean` removes the worktree, branch, stored
 base, empty sibling folder and the CodeGraph decision. It never commits and never touches the main
 checkout's branch or index.
 All commands except `worktree` are idempotent; `--dry-run` writes nothing. Exit codes: 0 ok,
